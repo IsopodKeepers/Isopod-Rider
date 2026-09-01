@@ -38,14 +38,22 @@ const GRAV=0.34*T*T, AIR=0.86;   // floatier air = more hang off every crest    
 const ACCEL=0.190*T*T, BRAKE=0.22*T*T, SLOPE=0.165*T*T, DRAG=0.010*T*T,
       QDRAG=0.000544, CDRAG=0.0000047/T;   // v^2 term is scale-free; v^3 term needs 1/T
 const LEAN=0.055*T, R=11;
-// Real isopod morphs -- these are the varieties people actually keep.
+// sh = shell body, bd = rim + plate seams, hi = highlight, hd = head, lg = legs, dk = eye/antennae.
+// sm = per-seam colours (optional) for shells whose lines are mixed colours.
 const PODS=[
-  {n:'RUBBER DUCKY', dk:'#a8471d', bd:'#ff8a4c', hi:'#ffcf9a', hd:'#ffe0b8', lg:'#5e2410'},
-  {n:'PANDA KING',   dk:'#33333c', bd:'#f0f0ea', hi:'#ffffff', hd:'#ffffff', lg:'#232329'},
-  {n:'DAIRY COW',    dk:'#6b5a3e', bd:'#efe6cf', hi:'#fff8e6', hd:'#fffdf4', lg:'#463a26'},
-  {n:'ZEBRA',        dk:'#4a4a54', bd:'#c9c9c2', hi:'#eeeee6', hd:'#ffffff', lg:'#2f2f36'},
-  {n:'BLUE GHOST',   dk:'#2b5aa8', bd:'#6fb2f0', hi:'#c2e4ff', hd:'#e6f4ff', lg:'#1d3d73'},
+  {n:'EMBER BEE',      sh:'#151515', dk:'#a8471d', bd:'#ff8a4c', hi:'#ffcf9a', hd:'#ffe0b8', lg:'#5e2410'},
+  {n:'ZEBRA',          sh:'#151515', dk:'#4a4a54', bd:'#f0f0ea', hi:'#ffffff', hd:'#ffffff', lg:'#232329'},
+  {n:'CHERRY BLOSSOM', sh:'#ff7eb6', dk:'#b0416f', bd:'#ffb3d1', hi:'#ffe0ee', hd:'#ffd6e6', lg:'#7a2c4c'},
+  {n:"DAN'S COSMIC DUST", sh:'#151515', dk:'#3a3a3a', bd:'#ff7ec8', hi:'#ffffff', hd:'#e6e6e6', lg:'#232329',
+     mix:['#5cf07a','#ff7ec8','#ffe95c','#151515']},
+  {n:'GLACIER',        sh:'#ffffff', dk:'#8aa4b8', bd:'#d3dee7', hi:'#ffffff', hd:'#f4f8fb', lg:'#6b8296'},
 ];
+// Cosmic Dust: shuffle its palette into the shell + eight seams each time the page loads.
+for(const p of PODS)if(p.mix){
+  const pick=()=>p.mix[Math.floor(Math.random()*p.mix.length)];
+  p.sh=pick();p.sm=[];for(let i=0;i<8;i++){let c=pick();while(c===p.sh)c=pick();p.sm.push(c);}
+  p.bd=p.sm[0];
+}
 let podIdx=0, started=false;
 const waters=[];   // {a,b,y} spans where falling below the surface drowns you
 const rails=[];    // {a,b,y,crown} bars you can land on and grind
@@ -818,15 +826,16 @@ function startScreen(){
 // The rolled-up shell: a dark disc with a thick rim in the pod's body colour and
 // eight plate seams spiralling out from a slightly off-centre hub to the rim.
 function shell(r,p){
-  ctx.fillStyle='#151515';ctx.beginPath();ctx.arc(0,0,r,0,6.3);ctx.fill();
+  ctx.fillStyle=p.sh;ctx.beginPath();ctx.arc(0,0,r,0,6.3);ctx.fill();
   ctx.strokeStyle=p.bd;ctx.lineCap='butt';ctx.lineJoin='round';
   const hx=r*0.08,hy=r*0.04,n=8,lw=r*0.12;
   ctx.lineWidth=lw;
   for(let i=0;i<n;i++){const a=i/n*6.2832;
     const ex=hx+Math.cos(a)*r*0.9, ey=hy+Math.sin(a)*r*0.9;
     const am=a-0.5, cx=hx+Math.cos(am)*r*0.55, cy=hy+Math.sin(am)*r*0.55;
+    if(p.sm)ctx.strokeStyle=p.sm[i];
     ctx.beginPath();ctx.moveTo(hx,hy);ctx.quadraticCurveTo(cx,cy,ex,ey);ctx.stroke();}
-  ctx.beginPath();ctx.arc(0,0,r-lw*0.5,0,6.3);ctx.stroke();   // rim last so seam ends tuck under it
+  ctx.strokeStyle=p.bd;ctx.beginPath();ctx.arc(0,0,r-lw*0.5,0,6.3);ctx.stroke();   // rim last so seam ends tuck under it
   ctx.fillStyle=p.bd;ctx.beginPath();ctx.arc(hx,hy,r*0.1,0,6.3);ctx.fill();
   ctx.fillStyle=p.hi;ctx.globalAlpha=0.3;
   ctx.beginPath();ctx.ellipse(-r*.25,-r*.55,r*.3,r*.08,-0.4,0,6.3);ctx.fill();
