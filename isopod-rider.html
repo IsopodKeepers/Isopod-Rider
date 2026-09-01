@@ -266,7 +266,7 @@ const HILLS={
   p:{p:[0.50, 200, 480, 0.50, 1700, 0.20, 560, 0.10]}
 };
 function build(){
-  jumps.length=0;checks.length=0;waters.length=0;rails.length=0;
+  jumps.length=0;checks.length=0;waters.length=0;rails.length=0;boost.hit=false;
   for(let x=0;x<MAXW;x++)G[x]=base(Math.min(x,LEN));
   for(let x=0;x<340;x++)G[x]=G[340];
   const seq='skmjdwumskg'.split('');
@@ -423,14 +423,16 @@ cv.addEventListener('mousedown',e=>{
 });
 
 /* ---------- state ---------- */
-const P={},cam={x:0,y:0},fx=[],dust=[];
+const P={},cam={x:0,y:0},fx=[],dust=[],smoke=[];
+const BOOST_X=370, BOOST_MUL=1.15, BOOST_T=180, BOOST_R=R*3;   // one pickup at the start: +15% for 3 s
+const boost={hit:false};
 let attempts=1;
 function reset(keepTry){build();if(!keepTry)attempts=1;P.best=0;P.crashes=0;P.time=0;P.won=0;
   P.spawn={x:40,y:gAt(40)-R};respawn();cam.x=P.x-W/2;cam.y=P.y-H/2;}
 function respawn(){
   P.x=P.spawn.x;P.y=P.spawn.y;P.spd=4*T;P.vx=4*T;P.vy=0;
   P.ground=true;P.ang=0;P.lean=0;P.rot=0;P.vrot=0;P.curl=1;P.prevVy=0;
-  P.air=0;P.dead=0;P.press=0;P.wasLoad=false;P.relT=-999;P.relAmt=0;P.popQ=0;P.cased=0;P.splat=0;P.rail=null;fx.length=0;
+  P.air=0;P.dead=0;P.press=0;P.wasLoad=false;P.relT=-999;P.relAmt=0;P.popQ=0;P.cased=0;P.splat=0;P.rail=null;P.boost=0;fx.length=0;smoke.length=0;
 }
 function note(t,c){fx.push({t:0,text:t,col:c,x:P.x,y:P.y-30});}
 // Case it and you go down. No speed penalty to grind through -- you splat and the
@@ -593,6 +595,16 @@ function step(){
     if(!hitRail&&P.y+R>=g&&(P.vy>0||P.y+R>g+2))land(g);
   }
 
+  if(!boost.hit&&Math.abs(P.x-BOOST_X)<BOOST_R&&Math.abs(P.y-(gAt(BOOST_X)-BOOST_R*0.6))<BOOST_R){
+    boost.hit=true;P.boost=BOOST_T;P.spd*=BOOST_MUL;if(!P.ground){P.vx*=BOOST_MUL;}
+    note('BOOST!','#9fd8ff');SND.pop(1);
+  }
+  if(P.boost>0){
+    P.boost--;
+    if(P.ground)P.spd+=ACCEL*(BOOST_MUL-1)*(key.gas?1:2);
+    for(let i=0;i<2;i++)smoke.push({x:P.x-R*0.8+(Math.random()-.5)*4,y:P.y+(Math.random()-.5)*8,t:0,life:26+Math.random()*16,
+      vx:-(0.6+Math.random()*1.2),vy:-0.35-Math.random()*0.5,r:3+Math.random()*3});
+  }
   P.best=Math.max(P.best,P.spd);
   // break the surface and you go under -- no speed penalty, you just drown
   for(const w of waters)
@@ -603,6 +615,8 @@ function step(){
   for(let i=fx.length-1;i>=0;i--){const f=fx[i];f.t++;f.y-=.5;if(f.t>50)fx.splice(i,1);}
   for(let i=dust.length-1;i>=0;i--){const d=dust[i];d.t++;d.x+=d.vx;d.y+=d.vy;d.vy+=.1;
     if(d.t>d.life)dust.splice(i,1);}
+  for(let i=smoke.length-1;i>=0;i--){const s=smoke[i];s.t++;s.x+=s.vx;s.y+=s.vy;s.r+=0.18;
+    if(s.t>s.life)smoke.splice(i,1);}
 
   P.camSpd=(P.camSpd||0)+(P.spd-(P.camSpd||0))*0.08;
   const lead=Math.min(210,P.camSpd*15/T);
@@ -807,7 +821,10 @@ function draw(){
 
   for(const d of dust){ctx.globalAlpha=Math.max(0,1-d.t/d.life)*.5;
     ctx.fillStyle='#b58f60';ctx.fillRect(Math.round(d.x-CX),Math.round(d.y-CY),2,2);}
+  for(const s of smoke){ctx.globalAlpha=Math.max(0,1-s.t/s.life)*.55;
+    ctx.fillStyle=s.t<6?'#e8eef4':'#9aa3ad';ctx.beginPath();ctx.arc(s.x-CX,s.y-CY,s.r,0,6.3);ctx.fill();}
   ctx.globalAlpha=1;
+  if(!boost.hit)emblem(BOOST_X-CX,gAt(BOOST_X)-BOOST_R*0.6-CY,BOOST_R*2/13);
 
   // Smooth the DRAWN height only -- physics is untouched. Smoothing is applied to the offset above the dirt, not to y itself, so the pod
   // tracks the slope exactly at any speed instead of lagging behind it.
@@ -823,6 +840,23 @@ function draw(){
     txt(f.text,f.x-CX,f.y-CY,13,f.col,UI.ink,3);
     ctx.textAlign='left';ctx.globalAlpha=1;}
   if(started)hud();else startScreen();
+}
+
+// speed-booster emblem: three grey crystal points over a dark shield with a white spine.
+// s = pixels per unit; the shape is 13 units tall, centred on (x,y). Bobs gently.
+function emblem(x,y,s){
+  y+=Math.sin(performance.now()/380)*3;
+  ctx.save();ctx.translate(x,y);ctx.scale(s,s);
+  ctx.lineJoin='round';ctx.lineWidth=0.55;ctx.strokeStyle='#0a0a0a';
+  const poly=(pts,fill)=>{ctx.beginPath();ctx.moveTo(pts[0],pts[1]);for(let i=2;i<pts.length;i+=2)ctx.lineTo(pts[i],pts[i+1]);ctx.closePath();ctx.fillStyle=fill;ctx.fill();ctx.stroke();};
+  poly([0,-1.5,-4.6,-3.1,-6.5,0.3,-4.6,3.4,0,6.5,4.6,3.4,6.5,0.3,4.6,-3.1],'#2b2b2f');   // shield
+  poly([-6.3,-5.2,-3.4,-4.2,-2.3,-1.5,-3.9,-2.5,-6.0,-3.0],'#4b4c52');                    // left crystal
+  poly([6.3,-5.2,3.4,-4.2,2.3,-1.5,3.9,-2.5,6.0,-3.0],'#4b4c52');                          // right crystal
+  poly([0,-6.5,-2.2,-3.9,-0.4,-0.3,0,-0.5,0.4,-0.3,2.2,-3.9],'#4b4c52');                   // centre crystal
+  ctx.fillStyle='#ffffff';
+  for(let i=0;i<7;i++){const yy=0.4+i*0.8,w=i===0||i===6?0.35:0.9+Math.sin(i/6*Math.PI)*0.5;
+    ctx.beginPath();ctx.ellipse(0,yy,w,0.3,0,0,6.3);ctx.fill();}
+  ctx.restore();
 }
 
 /* ---------- UI kit: cream panels in wood frames, rounded cards, outlined text ---------- */
