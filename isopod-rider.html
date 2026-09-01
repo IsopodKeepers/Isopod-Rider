@@ -1,0 +1,853 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>ISOPOD RIDER</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%;background:#0a1410;color:#cfe0bb;
+    font-family:Verdana,"DejaVu Sans",sans-serif;overflow:hidden;
+    display:flex;align-items:center;justify-content:center}
+  #wrap{position:relative;box-shadow:0 0 0 3px #24422f,0 0 50px rgba(0,0,0,.8)}
+  canvas{display:block;image-rendering:pixelated;background:#12261d}
+  #hint{position:absolute;left:0;right:0;bottom:-28px;text-align:center;font-size:11px;color:#5d7a5f}
+  kbd{background:#24422f;border:1px solid #3a6b4b;border-radius:3px;padding:1px 5px;color:#9fd08a;font-size:10px}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="c" width="760" height="420"></canvas>
+  <div id="hint">
+    <kbd>↑</kbd> gas &nbsp; <kbd>space</kbd> load / brake &nbsp; <kbd>←</kbd><kbd>→</kbd> lean &nbsp; <kbd>R</kbd> restart
+  </div>
+</div>
+<script>
+(() => {
+"use strict";
+const W=760,H=420,cv=document.getElementById('c'),ctx=cv.getContext('2d');
+ctx.imageSmoothingEnabled=false;
+function fit(){const s=Math.max(1,Math.min(innerWidth/W,(innerHeight-70)/H));
+  cv.style.width=(W*s|0)+'px';cv.style.height=(H*s|0)+'px';}
+addEventListener('resize',fit);fit();
+
+/* ---------- tuning ---------- */
+const T=0.80;                 // time scale: same track, played slower
+const GRAV=0.34*T*T, AIR=0.86;   // floatier air = more hang off every crest        // air is a touch floaty, flash-game style
+const ACCEL=0.190*T*T, BRAKE=0.22*T*T, SLOPE=0.165*T*T, DRAG=0.010*T*T,
+      QDRAG=0.000544, CDRAG=0.0000047/T;   // v^2 term is scale-free; v^3 term needs 1/T
+const LEAN=0.055*T, R=11;
+// Real isopod morphs -- these are the varieties people actually keep.
+const PODS=[
+  {n:'RUBBER DUCKY', dk:'#a8471d', bd:'#ff8a4c', hi:'#ffcf9a', hd:'#ffe0b8', lg:'#5e2410'},
+  {n:'PANDA KING',   dk:'#33333c', bd:'#f0f0ea', hi:'#ffffff', hd:'#ffffff', lg:'#232329'},
+  {n:'DAIRY COW',    dk:'#6b5a3e', bd:'#efe6cf', hi:'#fff8e6', hd:'#fffdf4', lg:'#463a26'},
+  {n:'ZEBRA',        dk:'#4a4a54', bd:'#c9c9c2', hi:'#eeeee6', hd:'#ffffff', lg:'#2f2f36'},
+  {n:'BLUE GHOST',   dk:'#2b5aa8', bd:'#6fb2f0', hi:'#c2e4ff', hd:'#e6f4ff', lg:'#1d3d73'},
+];
+let podIdx=0, started=false;
+const waters=[];   // {a,b,y} spans where falling below the surface drowns you
+const rails=[];    // {a,b,y,crown} bars you can land on and grind
+// The bar bows gently upward toward its middle, so its start sits right at the peak
+// of your arc and it curves with you rather than sitting dead flat.
+const railYat=(rl,x)=>{
+  const t=Math.max(0,Math.min(1,(x-rl.a)/(rl.b-rl.a)));
+  return rl.y - rl.crown*Math.sin(Math.PI*t);
+};
+const C=()=>PODS[podIdx];
+const POP=5.2*T, POP_WINDOW=Math.round(22/T), POP_SWEET=Math.round(7/T);   // preload: hold down, release at the crest
+const CLEAN=0.65, ROUGH=1.30;     // landing angle tolerances
+
+/* ---------- terrain ----------
+   Flow comes from the shape of the ground, not from a scoring system: rolling
+   hills on a downhill trend, so every crest throws you and every landing is a
+   descending face that hands the speed straight back.                        */
+const MAXW=31000, G=new Float32Array(MAXW);
+let LEN=41000, FINISH=0;
+const RAIL_H=310;        // bar height above the gap floor -- set so its start sits
+                         // at the peak of the jump, not below it        // how high the bar floats above the gap floor        // how far the rail floats above the dip floor
+const FINALE_GAP=1.70;   // how much wider the last gap is than a normal dirt jump
+const jumps=[], checks=[];
+
+function base(x){
+  return 300 + x*0.009
+    - 58*Math.sin(x/430)
+    - 27*Math.sin(x/281+1.3)
+    - 9*Math.sin(x/152+0.7);
+}
+// A big rounded crest: long gentle climb, rounded top, steeper fall away. No cliff.
+// You launch off it because the ground curves away faster than gravity can hold you,
+// so it throws you when you are quick and just rolls over when you are slow.
+// A big rounded crest: long gentle climb, rounded top, steeper fall away. No cliff.
+// You launch because the ground curves away faster than gravity can hold you, so it
+// throws you when you are quick and just rolls over when you are slow.
+// A giant hill: eased climb, a tightly rounded top, then a long steady downslope.
+// You separate right at the apex where the ground is still level, so you launch
+// almost flat and the hill falls away underneath you -- which means you come down
+// ONTO the downslope instead of being flung at ground that isn't angled to catch you.
+function giantHill(x0,gUp,climb,Wt,gDn,desc,gRise,riseLen,flat){
+  if(flat===undefined)flat=0.24;   // how much the landing eases off toward the runout
+  const segA=130, segE=140, ss=t=>t*t*(3-2*t);
+  const prof=[]; let y=0;
+  const push=(len,f)=>{for(let i=0;i<len;i++){y+=f(i/len);prof.push(y);}};
+  push(segA, t=>-gUp*ss(t));                 // ease off the flat into the climb
+  push(climb, ()=>-gUp);                     // steady climb
+  push(Wt,   t=>-gUp+(gUp+gDn)*ss(t));       // rounded top: this is the launch
+  push(desc, t=>gDn*(1-flat*ss(t)));         // landing: steep on impact, flattens out
+  push(segE, t=>gDn*(1-flat)*(1-ss(t)));     // settle back to level
+  push(riseLen, t=>-gRise*Math.sin(Math.PI*t)); // climb out: overshoot the face and you hit this
+  for(let i=0;i<prof.length&&x0+i<MAXW;i++)G[x0+i]+=prof[i];
+  const tot=prof[prof.length-1];
+  for(let x=x0+prof.length;x<MAXW;x++)G[x]+=tot;
+  return {crest:x0+segA+climb+Math.round(Wt*0.5), end:x0+prof.length};
+}
+// An M: hump, dip, hump. Roll it slow and you drop into the middle and take the
+// second hump on its own. Arrive fast and you clear the whole thing onto the far
+// downslope. Come in between and you case the up-face of the second hump.
+// A built dirt jump: steep takeoff lip, a real gap, then a separate landing mound
+// whose face is angled to catch you. Nothing rounded about it -- you either commit
+// and clear the gap onto the landing, or you case the up-face of the mound.
+function dirtJump(x0,H,gapMul){
+  if(gapMul===undefined)gapMul=1;
+  const ss=t=>t*t*(3-2*t);
+  const prof=[]; let y=0;
+  const push=(len,f)=>{for(let i=0;i<len;i++){y+=f(i/len);prof.push(y);}};
+  push(140, t=>-0.62*ss(t));                    // approach eases INTO the face angle
+  push(Math.round(200*H), ()=>-0.62);           // steep takeoff face
+  push(95, t=>-0.62+1.42*ss(t));               // tight lip: this is the kick
+  const lip=prof.length;
+  push(65,  ()=>0.80);                          // back of the takeoff mound
+  push(60,  t=>0.80-0.75*ss(t));                // rounds into the gap floor
+  push(Math.round(150*H*gapMul), ()=>0.05);     // THE GAP
+  push(105, t=>0.05-0.90*ss(t));                // up-face of the landing mound
+  push(70,  ()=>-0.85);
+  push(75,  t=>-0.85+1.55*ss(t));               // peak of the landing mound
+  push(Math.round(900*H+750), t=>0.32*(1-0.30*ss(t)));  // shallow: the ground no
+                                                        // longer falls 800px away from you  // landing scales gently: a small jump still throws you far  // landing face, flattening
+  push(190, t=>0.32*0.70*(1-ss(t)));
+  push(470, t=>-0.22*Math.sin(Math.PI*t));      // climb out
+  for(let i=0;i<prof.length&&x0+i<MAXW;i++)G[x0+i]+=prof[i];
+  const tot=prof[prof.length-1];
+  for(let x=x0+prof.length;x<MAXW;x++)G[x]+=tot;
+  return {crest:x0+lip-52, second:x0+lip+125+Math.round(150*H*gapMul)+250, end:x0+prof.length};
+}
+// STEP-UP: launch off a ramp and land on a platform set at the apex of your arc.
+// At the top of a jump your vertical speed is ~0, so a well-judged one touches down
+// almost flat. Come in slow and you smack the face of the step instead.
+// STEP-UP: launch off a ramp and land on a platform set at the apex of your arc.
+// At the top of a jump your vertical speed is ~0, so a well-judged one touches down
+// almost flat. Come in slow and you smack the face of the step instead.
+function stepUp(x0){
+  const ss=t=>t*t*(3-2*t);
+  const prof=[]; let y=0;
+  const push=(len,f)=>{for(let i=0;i<len;i++){y+=f(i/len);prof.push(y);}};
+  // A long open run-in so you can actually reach top speed, then a short steep
+  // kicker. Length here is runway, not ramp -- a long ramp bleeds the speed.
+  push(300, t=>0.28*ss(t));
+  push(900, ()=>0.28);                // the run-up
+  push(300, t=>0.28*(1-ss(t)));       // level out so you arrive flat and fast
+  push(260, ()=>0);
+  push(220, t=>-0.90*ss(t));          // swing up into the kicker
+  push(130, ()=>-0.90);               // The kicker. Steeper is NOT better here --
+                                      // past ~0.9 you lose more speed climbing it
+                                      // than the extra angle gives back.
+  push(90,  t=>-0.90+1.20*ss(t));     // lip
+  const lip=prof.length;
+  push(60,  ()=>0.30);                // back of the ramp
+  push(230, ()=>0.02);                // the gap, down at the low level
+  push(170, ()=>-1.35);               // THE STEP FACE -- you need the pop to clear it -- a wall, not a ramp
+  const top=prof.length;
+  push(860, t=>-0.03+0.06*ss(t));     // the platform, up at apex height
+  push(300, t=>0.34*ss(t));           // roll off the far side
+  push(360, ()=>0.34);
+  push(300, t=>0.34*(1-ss(t)));
+  push(420, t=>-0.22*Math.sin(Math.PI*t));
+  for(let i=0;i<prof.length&&x0+i<MAXW;i++)G[x0+i]+=prof[i];
+  const tot=prof[prof.length-1];
+  for(let x=x0+prof.length;x<MAXW;x++)G[x]+=tot;
+  return {crest:x0+lip-40, second:x0+top, end:x0+prof.length};
+}
+// WATER GAP: ramp, then a flooded basin, then a landing bank on the far side.
+// Come up short and you go in -- no scrubbing speed, you just drown.
+// RAIL JUMP: one take-off, three outcomes. Short and you drop in the dip. Judge it
+// and you land flat on the rail and grind it. Come in hot and you clear the whole
+// thing and land on the far ramp. The rail sits at apex height so a hit is level.
+// RAIL: a bar on stilts out over a gap, ending in mid-air. Land on it and grind,
+// then fly off the END into open air and come down on the landing ramp beyond.
+// Arrive hot enough and you clear the whole structure without touching it.
+function railJump(x0){
+  const ss=t=>t*t*(3-2*t);
+  const prof=[]; let y=0;
+  const push=(len,f)=>{for(let i=0;i<len;i++){y+=f(i/len);prof.push(y);}};
+  push(150, t=>-0.60*ss(t));
+  push(230, ()=>-0.60);                      // the take-off ramp
+  push(90,  t=>-0.60+0.90*ss(t));            // lip
+  const lip=prof.length;
+  push(60,  ()=>0.30);
+  push(150, ()=>1.30);                       // ground drops away hard
+  const da=prof.length;
+  push(950, ()=>0.0);                        // the gap floor, far below the bar
+  const db=prof.length;
+  push(110, ()=>-0.72);                      // low bank on the far side
+  push(60,  t=>-0.72+0.72*ss(t));
+  const top=prof.length;
+  push(1150, t=>0.62*(1-0.30*ss(t)));        // the landing you come down on
+  push(220, t=>0.62*0.70*(1-ss(t)));
+  push(430, t=>-0.20*Math.sin(Math.PI*t));
+  for(let i=0;i<prof.length&&x0+i<MAXW;i++)G[x0+i]+=prof[i];
+  const tot=prof[prof.length-1];
+  for(let x=x0+prof.length;x<MAXW;x++)G[x]+=tot;
+  const floor=G[Math.round(x0+da+400)];
+  // The bar stops well short of the far bank, so its end hangs over nothing.
+  rails.push({a:x0+da+150,b:x0+da+810,y:floor-RAIL_H,crown:26});
+  return {crest:x0+lip-45, second:x0+top, end:x0+prof.length};
+}
+function waterGap(x0,H){
+  const ss=t=>t*t*(3-2*t);
+  const prof=[]; let y=0;
+  const push=(len,f)=>{for(let i=0;i<len;i++){y+=f(i/len);prof.push(y);}};
+  push(150, t=>-0.60*ss(t));
+  push(Math.round(210*H), ()=>-0.60);          // the take-off bank
+  push(95,  t=>-0.60+0.92*ss(t));              // lip
+  const lip=prof.length;
+  push(70,  ()=>0.32);
+  push(130, t=>0.32+0.85*ss(t));               // bank drops into the basin
+  const wa=prof.length;
+  push(Math.round(340*H), ()=>0.0);            // THE WATER
+  const wb=prof.length;
+  push(150, t=>1.17-2.10*ss(t));               // far bank climbs out
+  push(120, ()=>-0.93);
+  push(90,  t=>-0.93+1.60*ss(t));              // top of the far bank
+  const top=prof.length;
+  push(Math.round(820*H+700), t=>0.67*(1-0.30*ss(t)));  // landing face
+  push(220, t=>0.67*0.70*(1-ss(t)));
+  push(430, t=>-0.20*Math.sin(Math.PI*t));
+  for(let i=0;i<prof.length&&x0+i<MAXW;i++)G[x0+i]+=prof[i];
+  const tot=prof[prof.length-1];
+  for(let x=x0+prof.length;x<MAXW;x++)G[x]+=tot;
+  const floor=G[Math.round(x0+(wa+wb)/2)];
+  waters.push({a:x0+wa-90,b:x0+wb+300,y:floor-58});
+  return {crest:x0+lip-45, second:x0+top, end:x0+prof.length};
+}
+function mHill(x0){
+  const segA=140, ss=t=>t*t*(3-2*t);
+  const prof=[]; let y=0;
+  const push=(len,f)=>{for(let i=0;i<len;i++){y+=f(i/len);prof.push(y);}};
+  push(segA, t=>-0.34*ss(t));
+  push(240, ()=>-0.34);                       // climb the first hump
+  push(210, t=>-0.34+0.68*ss(t));             // crest 1 -- the launch
+  const crest1=prof.length;
+  push(125, ()=>0.34);                        // short back face: the slow landing
+  push(105, t=>0.34-0.64*ss(t));              // through the dip
+  push(105, ()=>-0.30);                       // up-face of hump 2: the case zone
+  push(140, t=>-0.30+0.66*ss(t));             // crest 2
+  const crest2=prof.length;
+  push(1250, t=>0.36*(1-0.30*ss(t)));         // far downslope: the send-it landing
+  push(320, t=>0.36*0.70*(1-ss(t)));
+  push(500, t=>-0.20*Math.sin(Math.PI*t));
+  for(let i=0;i<prof.length&&x0+i<MAXW;i++)G[x0+i]+=prof[i];
+  const tot=prof[prof.length-1];
+  for(let x=x0+prof.length;x<MAXW;x++)G[x]+=tot;
+  return {crest:x0+crest1-130, second:x0+crest2-130, end:x0+prof.length};
+}
+const HILLS={
+  //        gUp  climb  Wt   gDn   desc  gRise riseLen
+  s:{p:[0.26, 160, 210, 0.28,  560, 0.20, 500]},
+  m:{p:[0.30, 220, 240, 0.32,  640, 0.20, 530]},
+  l:{p:[0.34, 290, 280, 0.36,  980, 0.20, 580]},
+  // steep launcher: a hard climb into a TIGHT crest, so you tear off it while still
+  // pointing upward instead of rolling over the top. real height, steep landing.
+  p:{p:[0.50, 200, 480, 0.50, 1700, 0.20, 560, 0.10]}
+};
+function build(){
+  jumps.length=0;checks.length=0;waters.length=0;rails.length=0;
+  for(let x=0;x<MAXW;x++)G[x]=base(Math.min(x,LEN));
+  for(let x=0;x<340;x++)G[x]=G[340];
+  const seq='skmjdwumskg'.split('');
+  let x=560;
+  for(let i=0;i<seq.length&&x<LEN-5400;i++){
+    const k=seq[i];
+    const r = k==='g' ? railJump(x) : k==='w' ? waterGap(x,1.0) : k==='d' ? mHill(x) : k==='u' ? stepUp(x) : k==='j' ? dirtJump(x,1.15) : k==='k' ? dirtJump(x,0.62) : giantHill(x,...HILLS[k].p);
+    jumps.push({x:r.crest,kind:k,start:x,second:r.second,end:r.end});
+    x=r.end+(k==='j'||k==='k'?95:k==='d'||k==='u'||k==='w'||k==='g'?90:80);
+  }
+  // FINALE: a proper gap jump, sized so you have to commit rather than sail over it
+  const fr=dirtJump(x,1.25,FINALE_GAP);
+  jumps.push({x:fr.crest,kind:'j',start:x,second:fr.second});
+  for(let i=1;i<=5;i++){const cx=Math.round(LEN*i/6);checks.push({x:cx,y:G[cx],hit:false});}
+  FINISH=Math.min(LEN-200,fr.end+260);
+}
+
+const gAt=x=>G[Math.max(0,Math.min(MAXW-1,Math.round(x)))];
+// Smooth (interpolated) sample, used ONLY for the ground-follow delta. Rounding to
+// the nearest whole pixel made that delta jitter by up to the local gradient, which
+// on a steep face cleared the detach threshold on its own: the isopod skipped off
+// perfectly smooth ground and it wrecked preload timing just before a lip.
+const gSm=x=>{
+  const c=Math.max(0,Math.min(MAXW-1.001,x));
+  const i=c|0, f=c-i;
+  return G[i]+(G[i+1]-G[i])*f;
+};
+// a centred sample straddles a jump lip and reports the cliff instead of the ramp,
+// which poisons the takeoff attitude. Fall back to one-sided near a discontinuity.
+function angAt(x){const d=7,a=gAt(x-d),b=gAt(x),c=gAt(x+d);
+  if(Math.abs(c-b)>14)return Math.atan2(b-a,d);
+  if(Math.abs(b-a)>14)return Math.atan2(c-b,d);
+  return Math.atan2(c-a,2*d);}
+const norm=a=>{while(a>Math.PI)a-=2*Math.PI;while(a<-Math.PI)a+=2*Math.PI;return a;};
+const angLerp=(a,b,t)=>a+norm(b-a)*t;
+
+/* ---------- input ---------- */
+const key={};
+const MAP={ArrowUp:'gas',KeyW:'gas',Space:'brake',ArrowDown:'brake',KeyS:'brake',
+           ArrowLeft:'back',KeyA:'back',ArrowRight:'fwd',KeyD:'fwd',KeyR:'reset'};
+addEventListener('keydown',e=>{
+  if(!started){
+    const d='12345'.indexOf(e.key);
+    if(d>=0&&d<PODS.length){podIdx=d;e.preventDefault();return;}
+    if(e.code==='Space'||e.code==='Enter'){started=true;e.preventDefault();return;}
+  }
+  const k=MAP[e.code];if(!k)return;e.preventDefault();
+  if(k==='reset'){reset();return;}key[k]=true;});
+addEventListener('keyup',e=>{const k=MAP[e.code];if(k)key[k]=false;});
+cv.addEventListener('mousedown',e=>{
+  const r=cv.getBoundingClientRect();
+  const mx=(e.clientX-r.left)*(W/r.width), my=(e.clientY-r.top)*(H/r.height);
+  if(!started){
+    const n=PODS.length,gap=126,x0=W/2-(n-1)*gap/2,y=H/2-40;
+    for(let i=0;i<n;i++){const px=x0+i*gap;
+      if(mx>px-52&&mx<px+52&&my>y-52&&my<y+72){
+        if(podIdx===i)started=true; else podIdx=i;   // click to select, click again to ride
+        return;}}
+    started=true;
+  }
+});
+
+/* ---------- state ---------- */
+const P={},cam={x:0,y:0},fx=[],dust=[];
+let attempts=1;
+function reset(keepTry){build();if(!keepTry)attempts=1;P.best=0;P.crashes=0;P.time=0;P.won=0;
+  P.spawn={x:40,y:gAt(40)-R};respawn();cam.x=P.x-W/2;cam.y=P.y-H/2;}
+function respawn(){
+  P.x=P.spawn.x;P.y=P.spawn.y;P.spd=4*T;P.vx=4*T;P.vy=0;
+  P.ground=true;P.ang=0;P.lean=0;P.rot=0;P.curl=1;P.prevVy=0;
+  P.air=0;P.dead=0;P.press=0;P.wasLoad=false;P.relT=-999;P.relAmt=0;P.popQ=0;P.cased=0;P.splat=0;P.rail=null;fx.length=0;
+}
+function note(t,c){fx.push({t:0,text:t,col:c,x:P.x,y:P.y-30});}
+// Case it and you go down. No speed penalty to grind through -- you splat and the
+// run starts over.
+function splat(msg,col){
+  if(P.splat)return;
+  if(msg){P.splat=Math.round(48/T);P.spd=0;P.vx=0;P.vy=0;P.cased=(P.cased||0)+1;
+    note(msg,col);for(let i=0;i<30;i++)dust.push({x:P.x,y:P.y,t:0,life:24+Math.random()*18,
+      col:col,vx:(Math.random()-0.5)*4.5,vy:-Math.random()*4.2});return;}
+  P.splat=Math.round(48/T);P.spd=0;P.vx=0;P.vy=0;P.cased=(P.cased||0)+1;
+  note('SPLAT','#ff6b6b');puff(34,P.x,P.y+R,5.2);
+}
+function puff(n,x,y,p){for(let i=0;i<n;i++)dust.push({x,y,t:0,life:18+Math.random()*14,
+  vx:(Math.random()-.5)*p,vy:-Math.random()*p*.6});}
+
+/* ---------- step ---------- */
+function step(){
+  if(!started||P.won)return;
+  P.time++;
+  if(P.splat>0){
+    P.splat--;
+    for(let i=dust.length-1;i>=0;i--){const d=dust[i];d.t++;d.x+=d.vx;d.y+=d.vy;d.vy+=0.1;
+      if(d.t>d.life)dust.splice(i,1);}
+    for(let i=fx.length-1;i>=0;i--){const f=fx[i];f.t++;f.y-=0.5;if(f.t>50)fx.splice(i,1);}
+    if(!P.splat){attempts++;reset(true);}
+    return;
+  }
+  if(P.dead>0){P.dead--;P.rot+=0.3;P.vy+=GRAV;P.x+=P.vx;P.y+=P.vy;
+    if(!P.dead)respawn();return;}
+
+  // ball on the dirt, unfurls in the air
+  // only unfurl for real air. a 3-frame hop used to pop the ball open, which made
+  // the whole thing flicker.
+  // On the rail he gets up on his legs and slides. Everywhere else, ball.
+  const wantBall=(P.ground&&!P.rail)||(!P.ground&&P.air<15);
+  P.curl+=((wantBall?1:0)-P.curl)*(wantBall?0.22:0.14)*T;
+
+  if(P.ground&&P.rail){
+    // GRINDING: steel, not dirt. Barely any resistance, so a clean rail hit
+    // actually pays you speed instead of costing it.
+    if(key.gas)P.spd+=ACCEL*0.75;
+    P.spd-=DRAG*0.15+P.spd*P.spd*QDRAG*0.20;
+    const rd=6,ra=Math.atan2(railYat(P.rail,P.x+rd)-railYat(P.rail,P.x-rd),2*rd);
+    // no rolling on steel -- he stands and slides, body lying along the bar
+    P.spin=(P.spin||0)*0.80;          // bleed off the roll; steel does not spin you
+    P.rot=angLerp(P.rot,ra,0.30);
+    P.ang=ra;P.lean=ra;
+    P.x+=P.spd*Math.cos(ra);P.y=railYat(P.rail,P.x)-R;P.prevVy=0;
+    P.grindT=(P.grindT||0)+1;
+    // sparks off the contact point, streaming back and dying out
+    const spark=Math.min(4,1+Math.floor(P.spd*0.22));
+    for(let i=0;i<spark;i++){
+      const hot=Math.random();
+      dust.push({x:P.x-R*0.35+Math.random()*4,y:P.y+R*0.85,t:0,
+        life:9+Math.random()*16,
+        col: hot>0.82?'#ffffff' : hot>0.5?'#ffe9a0' : '#ff9e3d',
+        vx:-(1.2+Math.random()*3.2)-P.spd*0.14,
+        vy:-(Math.random()*2.4)-0.6});
+    }
+    if(P.x>P.rail.b){                                 // off the end
+      P.rail=null;P.grindT=0;
+      const g=gAt(P.x);
+      if(Math.abs((P.y+R)-g)<16){                     // bar ends level with the bank:
+        P.ground=true;P.y=g-R;P.ang=angAt(P.x);       // hand over to the dirt rather
+        P.lean=P.ang;P.prevVy=P.spd*Math.sin(P.ang);  // than launching into the air
+      }else{
+        P.ground=false;P.air=0;P.launchSpd=P.spd;P.vx=P.spd;P.vy=0;
+      }
+    }
+  } else if(P.ground){
+    const a=P.ang;
+    if(key.gas)P.spd+=ACCEL*(P.spd<4*T?2.6:1); // strong low end, so you can never grind to 0
+    else if(P.spd>3.2*T)P.spd-=0.160*T*T;               // let off and you genuinely slow down
+    // hold DOWN to squash into the hill. it scrubs a little speed, and if you let
+    // go as the crest throws you, that stored load comes back as extra air.
+    if(key.brake){
+      P.press=Math.min(1,P.press+0.055*T);
+      P.spd-=BRAKE*0.45;                      // loading scrubs speed: that is the trade
+      P.wasLoad=true;
+    }else{
+      // latch ONCE on the release edge. refreshing this every frame while the
+      // compression decayed meant the timestamp landed after the launch itself.
+      if(P.wasLoad&&P.press>0.30){P.relT=P.time;P.relAmt=P.press;}
+      P.wasLoad=false;
+      P.press=Math.max(0,P.press-0.14*T);
+    }
+    P.spd+=SLOPE*Math.sin(a);                 // gravity down the face
+    P.spd-=DRAG+P.spd*P.spd*QDRAG+P.spd*P.spd*P.spd*CDRAG;   // resistance, steep at the top end
+    if(P.spd<0)P.spd=0;
+
+    P.spin=P.spd/R;P.rot+=P.spin;   // record the roll rate; the shell blur needs it
+    P.lean=a;
+    const ox=P.x, oy=gAt(P.x);
+    P.x+=P.spd*Math.cos(a);
+    const ny=gAt(P.x), vy=ny-oy;
+    if(vy-P.prevVy>GRAV*2.1/T&&P.spd>2.5*T){                 // ground dropped away: airborne
+      // Leave from the point we were actually standing on. Advancing x first and
+      // keeping the old y buried the isopod inside steep climbing faces -- it then
+      // flew up through the takeoff ramp of a dirt jump.
+      P.x=ox;P.y=oy-R;
+      P.ground=false;P.air=0;P.launchSpd=P.spd;
+      P.vx=P.spd*Math.cos(a);P.vy=P.prevVy+GRAV;
+      const dt=P.time-(P.relT||-999);
+      if(dt>=0&&dt<=POP_WINDOW&&(P.relAmt||0)>0.30){
+        const q=(1-Math.abs(dt-POP_SWEET)/POP_WINDOW)*P.relAmt;
+        if(q>0.05){
+          P.vy-=POP*q; P.vx+=POP*0.35*q*Math.cos(a);
+          puff(9,P.x,P.y+R,3.4);
+          note(q>0.62?'BOOSTED!':'pop', q>0.62?'#d6f27a':'#9ff0c0');
+          P.popQ=q;
+        }
+      }
+      P.relT=-999;
+    }else{P.y=ny-R;P.prevVy=vy;P.ang=angAt(P.x);}
+  }else{
+    P.air++;
+    if(key.back)P.lean-=LEAN;
+    if(key.fwd)P.lean+=LEAN;
+    // a thrown body swings to face its own arc: landings work by default,
+    // leaning is for fine-tuning rather than survival
+    if(P.air>4/T){
+      // set up for the landing: half the arc you are on, half the ground you are
+      // heading for. this is what stops long airs from landing badly.
+      const fl=Math.atan2(P.vy,P.vx), gr=angAt(P.x+P.vx*12);
+      P.lean=angLerp(P.lean,fl+norm(gr-fl)*0.55,0.055*T);
+    }
+    // angle of attack: nose up and you hang, nose down and you drop onto the landing.
+    // leaning is something you use, not something that punishes you.
+    const aoa=norm(P.lean-Math.atan2(P.vy,P.vx));
+    P.vy+=GRAV*AIR*(1+Math.max(-0.45,Math.min(0.45,aoa))*0.55);
+    const px=P.x,py=P.y;
+    P.x+=P.vx;P.y+=P.vy;
+    const pr=P.rot;
+    P.rot=angLerp(P.rot,P.lean,0.22);         // spin settles into the lean
+    P.spin=norm(P.rot-pr);
+    const g=gAt(P.x);
+    // Test whether we CROSSED the surface, not whether we happen to be falling.
+    // Requiring vy>0 meant flying upward into a climbing face -- the takeoff ramp
+    // of a dirt jump -- registered no collision at all, and you went through it.
+    // Falling: land on contact. Rising: land once you are genuinely buried. Off a
+    // lip a pixel of overlap is normal and clears as the crest falls away, but
+    // flying up into a ramp face buries you and must resolve.
+    // Rails catch you from above only, so you can fly under one. A slow rider is
+    // already below the bar by the time they reach it; a fast one is still above it
+    // and sails over. Only a judged hit lands on top.
+    let hitRail=false;
+    for(const rl of rails){
+      const ry=railYat(rl,P.x), pry=railYat(rl,px);
+      if(P.x>rl.a&&P.x<rl.b&&P.vy>0&&py+R<=pry+4&&P.y+R>=ry){
+        if(Math.abs(norm(P.lean))>1.0){splat();return;}   // came down on it sideways
+        P.rail=rl;P.ground=true;P.y=ry-R;P.ang=0;P.lean=0;P.prevVy=0;
+        P.spd=Math.max(0,P.vx)*1.02;P.vy=0;P.air=0;
+        note('GRIND!','#d6f27a');
+        for(let i=0;i<12;i++)dust.push({x:P.x,y:P.y+R,t:0,life:14+Math.random()*10,
+          col:'#ffe9a0',vx:-Math.random()*3.5,vy:-Math.random()*1.8});
+        hitRail=true;break;
+      }
+    }
+    if(!hitRail&&P.y+R>=g&&(P.vy>0||P.y+R>g+2))land(g);
+  }
+
+  P.best=Math.max(P.best,P.spd);
+  // break the surface and you go under -- no speed penalty, you just drown
+  for(const w of waters)
+    if(P.x>w.a&&P.x<w.b&&P.y+R*0.35>w.y){splat('SPLASH!','#8fe0f4');break;}
+  for(const c of checks)if(!c.hit&&P.x>c.x){c.hit=true;P.spawn={x:c.x,y:c.y-R};}
+  if(!P.won&&P.x>FINISH)P.won=P.time;
+
+  for(let i=fx.length-1;i>=0;i--){const f=fx[i];f.t++;f.y-=.5;if(f.t>50)fx.splice(i,1);}
+  for(let i=dust.length-1;i>=0;i--){const d=dust[i];d.t++;d.x+=d.vx;d.y+=d.vy;d.vy+=.1;
+    if(d.t>d.life)dust.splice(i,1);}
+
+  P.camSpd=(P.camSpd||0)+(P.spd-(P.camSpd||0))*0.08;
+  const lead=Math.min(210,P.camSpd*15/T);
+  cam.x+=((P.x-W*0.36+lead)-cam.x)*0.10;
+  // flying over a valley leaves the ground far below; drop the view so you can
+  // still see where you are coming down
+  let ty=P.y-H*0.52;
+  if(!P.ground)ty+=Math.min(130,Math.max(0,(gAt(P.x)-P.y)*0.35));
+  cam.y+=(ty-cam.y)*0.08;
+  cam.x=Math.max(0,cam.x);
+}
+
+function land(g){
+  const a=angAt(P.x);
+  P.ground=true;P.y=g-R;P.ang=a;
+  const inSpd=Math.hypot(P.vx,P.vy);
+  // Land on the downslope and you keep nearly everything. Overshoot onto the climb
+  // out the back and you pay for it -- that is what makes reading the hill matter.
+  const floor=a>0.04?0.86:0.44;
+  const proj=Math.max(inSpd*floor,Math.max(0,P.vx*Math.cos(a)+P.vy*Math.sin(a)));
+  // Settle onto the slope carrying the rate the ground itself is falling at. Zeroing
+  // this made the next frame look like the ground had dropped away, so the isopod
+  // re-launched instantly and chattered down every descent.
+  const settle=()=>{P.vy=0;P.lean=a;P.prevVy=P.spd*Math.sin(a);};
+
+  if(P.air<14/T){                      // skipped over a bump: carry on, no penalty
+    P.spd=Math.max(P.launchSpd||0,proj);settle();return;}
+  // How hard you meet the ground -- and the sign matters. Falling STEEPER than the
+  // face means you slam into it. Falling shallower just means you settle onto a
+  // slope already running away from you, which is a landing, not a crash.
+  const impact=norm(Math.atan2(P.vy,P.vx)-a);
+  // Since a case now ends the run, this has to mean 'you genuinely blew it' rather
+  // than 'you were a bit off'. Tight enough and no line through the course exists.
+  if(impact>0.86&&inSpd>10*T){
+    splat();settle();return;
+  }
+  const diff=Math.abs(norm(P.lean-a));
+  if(diff<CLEAN){
+    P.spd=proj*1.10;                    // land it flush, keep the lot
+    note(P.air>44?'BIG AIR':'SMOOTH','#d6f27a');puff(10,P.x,P.y+R,3);
+  }else if(diff<ROUGH){
+    P.spd=proj*0.88;
+    note('ROUGH','#ffd23f');puff(8,P.x,P.y+R,2.4);
+  }else{
+    splat();
+  }
+  settle();
+}
+
+/* ---------- draw ---------- */
+let decor=[];
+function buildDecor(){decor=[];let s=7331;
+  const rnd=()=>(s=(s*1103515245+12345)&0x7fffffff)/0x7fffffff;
+  for(let x=-200;x<LEN+400;x+=64)decor.push({x:x+rnd()*36,s:.28,h:70+rnd()*80,w:16+rnd()*20,k:rnd()});
+  for(let x=-200;x<LEN+400;x+=104)decor.push({x:x+rnd()*50,s:.55,h:110+rnd()*90,w:24+rnd()*28,k:rnd()});}
+
+function draw(){
+  const CX=Math.round(cam.x),CY=Math.round(cam.y);
+  const sky=ctx.createLinearGradient(0,0,0,H);
+  sky.addColorStop(0,'#20573c');sky.addColorStop(1,'#12261d');
+  ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
+
+  for(const d of decor){
+    const px=Math.round(d.x-CX*d.s),py=Math.round(240-CY*d.s);
+    if(px<-100||px>W+100)continue;
+    ctx.fillStyle=d.s<.4?'#143829':'#1a4832';
+    ctx.fillRect(px,py-d.h,d.w,d.h+520);
+    ctx.beginPath();ctx.arc(px+d.w/2,py-d.h,22+d.k*18,0,6.3);ctx.fill();}
+
+  for(let sx=0;sx<W;sx++){
+    const wx=CX+sx,sy=Math.round(gAt(wx)-CY);
+    if(sy>H)continue;
+    ctx.fillStyle='#8f5d31';ctx.fillRect(sx,sy,1,3);
+    ctx.fillStyle='#6d4423';ctx.fillRect(sx,sy+3,1,8);
+    ctx.fillStyle='#553417';ctx.fillRect(sx,sy+11,1,22);
+    ctx.fillStyle='#3a230f';ctx.fillRect(sx,sy+33,1,H);
+    if((wx*7919%41)===0){ctx.fillStyle='#a06f3d';ctx.fillRect(sx,sy+1,1,2);}
+    if((wx%14)===0){ctx.fillStyle='#427f42';ctx.fillRect(sx,sy-2,1,2);}}
+
+  // WATER: filled per column between the surface and the ground beneath it, so it
+  // sits in the basin instead of covering the terrain as a flat slab.
+  for(const rl of rails){
+    const sx=Math.round(rl.a-CX),ex=Math.round(rl.b-CX),sy=Math.round(rl.y-CY);
+    if(ex<-20||sx>W+20)continue;
+    for(let px=sx+18;px<ex-10;px+=70){           // legs down to the dirt
+      const wx2=CX+px,ry=railYat(rl,wx2),g=gAt(wx2);
+      ctx.fillStyle='#4a5560';ctx.fillRect(px,Math.round(ry-CY)+4,3,Math.max(0,Math.round(g-ry)));
+    }
+    for(let px=Math.max(0,sx);px<Math.min(W,ex);px++){
+      const ry=Math.round(railYat(rl,CX+px)-CY);
+      ctx.fillStyle='#39434d';ctx.fillRect(px,ry+3,1,4);
+      ctx.fillStyle='#aab4bf';ctx.fillRect(px,ry,1,3);
+      ctx.fillStyle='#e6edf3';ctx.fillRect(px,ry,1,1);
+    }
+    ctx.fillStyle='#5d6a76';
+    ctx.fillRect(sx-3,Math.round(railYat(rl,rl.a)-CY)-2,4,9);
+    ctx.fillRect(ex-1,Math.round(railYat(rl,rl.b)-CY)-2,4,9);
+  }
+
+  for(const w of waters){
+    const sx=Math.round(w.a-CX),ex=Math.round(w.b-CX),sy=Math.round(w.y-CY);
+    if(ex<0||sx>W||sy>H)continue;
+    for(let px=Math.max(0,sx);px<Math.min(W,ex);px++){
+      const g=gAt(CX+px);
+      if(g>w.y){
+        ctx.fillStyle='rgba(48,140,175,.60)';ctx.fillRect(px,sy,1,Math.round(g-w.y)+2);
+        ctx.fillStyle='rgba(120,215,240,.25)';ctx.fillRect(px,sy,1,4);
+      }
+    }
+    for(let px=Math.max(0,sx);px<Math.min(W,ex);px++){
+      if(gAt(CX+px)<=w.y)continue;
+      const wob=Math.sin((CX+px)*0.055+P.time*0.05)*1.6+Math.sin((CX+px)*0.017-P.time*0.03)*1.2;
+      ctx.fillStyle='#8fe0f4';ctx.fillRect(px,Math.round(sy+wob),1,2);
+      if(((CX+px)*7919%53)===0){ctx.fillStyle='#d9f7ff';ctx.fillRect(px,Math.round(sy+wob)-2,2,1);}
+    }
+  }
+
+  // marker boards: tells you what is coming while you still have room to choose a speed
+  for(const j of jumps){
+    const bx=j.start-260;
+    const sx=Math.round(bx-CX),sy=Math.round(gAt(bx)-CY);
+    if(sx<-40||sx>W+40)continue;
+    const col={s:'#6dbf5c',m:'#e8c14a',l:'#e88a3c',p:'#e8566c',d:'#9f7cf0',j:'#5fd0e8',k:'#5fd0e8',u:'#f0c24a',w:'#49c8f0',g:'#d0d6de'}[j.kind];
+    const n ={s:1,m:2,l:3,p:3,d:2,j:2,k:1,u:3,w:2,g:2}[j.kind];
+    ctx.fillStyle='#4a3520';ctx.fillRect(sx-1,sy-34,3,34);
+    ctx.fillStyle='#1a2b1e';ctx.fillRect(sx-13,sy-50,28,18);
+    ctx.fillStyle=col;ctx.fillRect(sx-11,sy-48,24,14);
+    ctx.fillStyle='#12261d';
+    if(j.kind==='g'){                      // bar = rail
+      ctx.fillRect(sx-11,sy-43,22,3);
+      ctx.fillRect(sx-8,sy-40,2,4);ctx.fillRect(sx+6,sy-40,2,4);
+    }else if(j.kind==='w'){                // wave = water gap
+      ctx.beginPath();
+      for(let q=0;q<=16;q++){const wx2=sx-8+q,wy=sy-42+Math.sin(q*0.8)*2.2;
+        if(q===0)ctx.moveTo(wx2,wy);else ctx.lineTo(wx2,wy);}
+      ctx.lineTo(sx+8,sy-37);ctx.lineTo(sx-8,sy-37);ctx.closePath();ctx.fill();
+    }else if(j.kind==='u'){                // up-arrow = step up
+      ctx.beginPath();ctx.moveTo(sx,sy-47);ctx.lineTo(sx-6,sy-40);ctx.lineTo(sx+6,sy-40);
+      ctx.closePath();ctx.fill();ctx.fillRect(sx-2,sy-41,4,5);
+    }else if(j.kind==='j'||j.kind==='k'){  // gap symbol = built dirt jump
+      ctx.fillRect(sx-10,sy-44,5,8);ctx.fillRect(sx+5,sy-44,5,8);
+      ctx.fillRect(sx-3,sy-40,6,2);
+    }else if(j.kind==='d'){                // twin peaks = an M
+      ctx.beginPath();ctx.moveTo(sx-9,sy-38);ctx.lineTo(sx-5,sy-46);ctx.lineTo(sx-1,sy-38);
+      ctx.lineTo(sx+3,sy-46);ctx.lineTo(sx+7,sy-38);ctx.lineTo(sx+7,sy-37);ctx.lineTo(sx-9,sy-37);
+      ctx.closePath();ctx.fill();
+    }else if(j.kind==='p'){                // chevrons = steep launcher
+      for(let i=0;i<2;i++){ctx.beginPath();
+        ctx.moveTo(sx-6+i*9,sy-38);ctx.lineTo(sx-2+i*9,sy-45);ctx.lineTo(sx+2+i*9,sy-38);
+        ctx.closePath();ctx.fill();}
+    }else for(let i=0;i<n;i++)ctx.fillRect(sx-8+i*7,sy-45,4,8);
+  }
+
+  for(const c of checks){
+    const sx=Math.round(c.x-CX),sy=Math.round(c.y-CY);
+    if(sx<-20||sx>W+20)continue;
+    ctx.fillStyle='#4a3520';ctx.fillRect(sx-1,sy-26,2,26);
+    ctx.fillStyle=c.hit?'#9ff0c0':'#5f7a66';ctx.fillRect(sx+1,sy-28,13,8);}
+
+  {const sx=Math.round(FINISH-CX),sy=Math.round(gAt(FINISH)-CY);
+   if(sx>-60&&sx<W+60){ctx.fillStyle='#e8f0d8';ctx.fillRect(sx-1,sy-62,3,62);
+    for(let r=0;r<4;r++)for(let q=0;q<5;q++){
+      ctx.fillStyle=((r+q)%2)?'#f2f6e8':'#20301f';
+      ctx.fillRect(sx+2+q*7,sy-62+r*7,7,7);}}}
+
+  for(const d of dust){ctx.globalAlpha=Math.max(0,1-d.t/d.life)*.5;
+    ctx.fillStyle='#b58f60';ctx.fillRect(Math.round(d.x-CX),Math.round(d.y-CY),2,2);}
+  ctx.globalAlpha=1;
+
+  // smooth the DRAWN height only -- physics is untouched. Harmless 1-2px micro-hops
+  // on descents were reading as the pod juddering along.
+  if(P.smY===undefined||Math.abs(P.smY-P.y)>26)P.smY=P.y;
+  P.smY+=(P.y-P.smY)*(P.ground?0.45:1);
+  pod(Math.round(P.x-CX),Math.round(P.smY-CY));
+
+  for(const f of fx){ctx.globalAlpha=Math.max(0,1-f.t/50);
+    ctx.font='bold 12px Verdana,sans-serif';ctx.textAlign='center';
+    ctx.fillStyle='#0a1410';ctx.fillText(f.text,f.x-CX+1,f.y-CY+1);
+    ctx.fillStyle=f.col;ctx.fillText(f.text,f.x-CX,f.y-CY);
+    ctx.textAlign='left';ctx.globalAlpha=1;}
+  if(!started)startScreen();
+  hud();
+}
+
+function startScreen(){
+  ctx.fillStyle='rgba(8,18,14,.88)';ctx.fillRect(0,0,W,H);
+  ctx.textAlign='center';
+  ctx.font='bold 26px Verdana,sans-serif';
+  ctx.fillStyle='#0a1410';ctx.fillText('ISOPOD RIDER',W/2+2,H/2-152);
+  ctx.fillStyle='#ffcf9a';ctx.fillText('ISOPOD RIDER',W/2,H/2-154);
+  ctx.font='bold 11px Verdana,sans-serif';
+  ctx.fillStyle='#7fa87f';ctx.fillText('pick your pod',W/2,H/2-118);
+
+  const n=PODS.length,gap=126,x0=W/2-(n-1)*gap/2,y=H/2-40;
+  for(let i=0;i<n;i++){
+    const px=x0+i*gap,p=PODS[i],sel=i===podIdx;
+    ctx.fillStyle=sel?'rgba(214,242,122,.14)':'rgba(255,255,255,.04)';
+    ctx.fillRect(px-52,y-52,104,124);
+    ctx.strokeStyle=sel?'#d6f27a':'#31503c';ctx.lineWidth=sel?2:1;
+    ctx.strokeRect(px-52,y-52,104,124);
+    // a curled pod in that colour
+    ctx.save();ctx.translate(px,y);ctx.rotate(-0.25);
+    const r=26;
+    ctx.fillStyle=p.dk;ctx.beginPath();ctx.ellipse(0,0,r,r,0,0,6.3);ctx.fill();
+    ctx.fillStyle=p.bd;ctx.beginPath();ctx.ellipse(0,-1,r-3.5,r-3.5,0,0,6.3);ctx.fill();
+    ctx.strokeStyle=p.dk;ctx.lineWidth=2.6;
+    for(let k=-3;k<=3;k++){const sx=k*(r/4.1),kk=1-Math.abs(k)/4.6;
+      ctx.beginPath();ctx.moveTo(sx,-r*kk+2);ctx.lineTo(sx,r*kk-2);ctx.stroke();}
+    ctx.fillStyle=p.hi;ctx.beginPath();ctx.ellipse(2,-r*.5,r*.42,3.6,0,0,6.3);ctx.fill();
+    ctx.fillStyle=p.hd;ctx.beginPath();ctx.ellipse(r*.62,0,r*.26,r*.66,0,0,6.3);ctx.fill();
+    ctx.fillStyle=p.lg;ctx.beginPath();ctx.arc(r*.74,-r*.2,3,0,6.3);ctx.fill();
+    ctx.restore();
+    ctx.font='bold 9px Verdana,sans-serif';
+    ctx.fillStyle=sel?'#d6f27a':'#6f8a72';ctx.fillText(p.n,px,y+40);
+    ctx.fillStyle=sel?'#d6f27a':'#4a6650';ctx.fillText(String(i+1),px,y+54);
+  }
+  ctx.font='bold 12px Verdana,sans-serif';
+  ctx.fillStyle='#cfe0bb';ctx.fillText('click a pod or press 1-'+n,W/2,H/2+96);
+  ctx.fillStyle='#d6f27a';ctx.fillText('SPACE to ride',W/2,H/2+118);
+  ctx.font='bold 10px Verdana,sans-serif';
+  ctx.fillStyle='#5d7a5f';
+  ctx.fillText('gas: UP   ·   load / brake: SPACE   ·   lean: LEFT RIGHT',W/2,H/2+150);
+  ctx.textAlign='left';
+}
+
+function pod(x,y){
+  const o=1-P.curl;                       // 0 = balled, 1 = splayed out
+  const gr=P.rail?Math.min(1,(P.grindT||0)/8):0;   // how settled into the grind stance
+  ctx.save();ctx.translate(x,y);ctx.rotate(P.rot);
+  const sq=P.splat>0?Math.min(1,(48/T-P.splat)/(6/T)):0;      // pancaked on impact
+  const len=R*(1+o*.10+gr*0.34)*(1+sq*0.85),hgt=R*(1-o*.06-gr*0.20)*(1-sq*0.62);
+  if(o>.05){ctx.globalAlpha=Math.min(1,o*1.6);
+    ctx.strokeStyle=C().lg;ctx.lineWidth=1.6+gr*0.7;
+    for(let i=0;i<6;i++){const lx=-len*.62+i*(len*.25);
+      // grinding: legs braced straight down onto the bar. otherwise they paddle.
+      const sw=gr>0 ? lx*-0.30 : Math.sin(P.time*.22+i)*1.4*o;
+      const reach=hgt*.72+(3.2*o)+gr*5.5;
+      ctx.beginPath();ctx.moveTo(lx,hgt*.7);ctx.lineTo(lx+sw,reach);ctx.stroke();}
+    ctx.globalAlpha=1;}
+  ctx.fillStyle=C().dk;ctx.beginPath();ctx.ellipse(0,0,len,hgt,0,0,6.3);ctx.fill();
+  ctx.fillStyle=C().bd;ctx.beginPath();ctx.ellipse(0,-.5,len-1.5,hgt-1.5,0,0,6.3);ctx.fill();
+  // Above ~0.6 rad/frame the 7 plates advance more than one plate per frame and
+  // strobe. Fade them out and fall back to concentric rings, which are rotationally
+  // symmetric and so cannot alias.
+  const sp=Math.abs(P.spin)||0;
+  const blur=Math.max(0,Math.min(1,(sp-0.55)/0.85));
+  if(blur<1){
+    ctx.globalAlpha=1-blur;
+    ctx.strokeStyle=C().dk;ctx.lineWidth=1.3;
+    for(let i=-3;i<=3;i++){const px=i*(len/4.1),k=1-Math.abs(i)/4.6;
+      ctx.beginPath();ctx.moveTo(px,-hgt*k);ctx.lineTo(px,hgt*k);ctx.stroke();}
+    ctx.globalAlpha=1;
+  }
+  if(blur>0){
+    ctx.globalAlpha=blur*0.55;
+    ctx.strokeStyle=C().dk;ctx.lineWidth=1.6;
+    for(const f of [0.42,0.72]){
+      ctx.beginPath();ctx.ellipse(0,0,len*f,hgt*f,0,0,6.3);ctx.stroke();}
+    ctx.globalAlpha=1;
+  }
+  ctx.fillStyle=C().hi;ctx.beginPath();ctx.ellipse(len*.1,-hgt*.48,len*.42,1.7,0,0,6.3);ctx.fill();
+  // bright head plate: always visible, so your lean angle is readable even balled up
+  ctx.fillStyle=C().hd;
+  ctx.beginPath();ctx.ellipse(len*.66,0,len*.26,hgt*.72,0,0,6.3);ctx.fill();
+  if(P.press>0.08){                      // charge ring: brighter the more you have loaded
+    ctx.globalAlpha=0.25+P.press*0.6;
+    ctx.strokeStyle=P.press>0.75?'#d6f27a':'#9ff0c0';ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(0,0,R+3+P.press*3,0,6.3*Math.min(1,P.press));ctx.stroke();
+    ctx.globalAlpha=1;}
+  ctx.fillStyle=C().lg;ctx.beginPath();ctx.arc(len*.78,-hgt*.2,1.6,0,6.3);ctx.fill();
+  if(o>.05){ctx.globalAlpha=Math.min(1,o*1.6);
+    ctx.fillStyle=C().dk;ctx.beginPath();ctx.ellipse(len*.88,0,3.2,hgt*.6,0,0,6.3);ctx.fill();
+    ctx.fillStyle='#141414';ctx.fillRect(len*.9,-2,2,2);
+    ctx.strokeStyle=C().dk;ctx.lineWidth=1.4;
+    ctx.beginPath();ctx.moveTo(len*.96,-1);ctx.lineTo(len*.96+3.5*o,-3);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(len*.96,1.5);ctx.lineTo(len*.96+3*o,3);ctx.stroke();
+    ctx.globalAlpha=1;}
+  ctx.restore();
+}
+
+function hud(){
+  ctx.font='bold 11px Verdana,sans-serif';ctx.textBaseline='top';
+  const t=(v,x,y,c)=>{ctx.fillStyle='#0a1410';ctx.fillText(v,x+1,y+1);ctx.fillStyle=c;ctx.fillText(v,x,y);};
+  ctx.font='bold 26px Verdana,sans-serif';
+  t(P.spd.toFixed(1),12,10,P.spd>14?'#d6f27a':'#e8f0d8');
+  ctx.font='bold 10px Verdana,sans-serif';
+  t('SPEED',13,40,'#7fa87f');
+  ctx.fillStyle='#0a1410';ctx.fillRect(12,54,180,8);
+  ctx.fillStyle=P.spd>14?'#d6f27a':'#6dbf5c';
+  ctx.fillRect(13,55,Math.round(178*Math.min(1,P.spd/22)),6);
+  const s=P.time/60;
+  t(Math.floor(s/60)+':'+String(Math.floor(s%60)).padStart(2,'0'),12,70,'#cfe0bb');
+  t('best '+P.best.toFixed(1),70,70,'#7fa87f');
+  t('attempt '+attempts,140,70,attempts>1?'#ff6b6b':'#5f7a66');
+  ctx.fillStyle='rgba(10,20,16,.6)';ctx.fillRect(W-190,14,178,6);
+  ctx.fillStyle='#9ff0c0';ctx.fillRect(W-190,14,Math.round(178*Math.min(1,P.x/FINISH)),6);
+
+  // ---- the road ahead: silhouette of the next stretch, with each hill flagged ----
+  const PW=300,PH=54,PX=W-PW-12,PY=28,AHEAD=6200,BEHIND=700;
+  ctx.fillStyle='rgba(10,20,16,.55)';ctx.fillRect(PX,PY,PW,PH);
+  let lo=1e9,hi=-1e9;
+  for(let i=0;i<=60;i++){const wx=P.x-BEHIND+(AHEAD+BEHIND)*i/60,g=gAt(wx);
+    if(g<lo)lo=g; if(g>hi)hi=g;}
+  const span=Math.max(120,hi-lo);
+  const py=wx=>PY+PH-6-((hi-gAt(wx))/span)*(PH-14);
+  ctx.beginPath();
+  for(let i=0;i<=PW;i++){const wx=P.x-BEHIND+(AHEAD+BEHIND)*i/PW;
+    const yy=py(wx); if(i===0)ctx.moveTo(PX,yy);else ctx.lineTo(PX+i,yy);}
+  ctx.lineTo(PX+PW,PY+PH);ctx.lineTo(PX,PY+PH);ctx.closePath();
+  ctx.fillStyle='#4a3018';ctx.fill();
+  ctx.strokeStyle='#8f5d31';ctx.lineWidth=1.5;ctx.beginPath();
+  for(let i=0;i<=PW;i++){const wx=P.x-BEHIND+(AHEAD+BEHIND)*i/PW;
+    const yy=py(wx); if(i===0)ctx.moveTo(PX,yy);else ctx.lineTo(PX+i,yy);}
+  ctx.stroke();
+  for(const j of jumps){
+    if(j.x<P.x-BEHIND||j.x>P.x+AHEAD)continue;
+    const px=PX+PW*(j.x-(P.x-BEHIND))/(AHEAD+BEHIND);
+    ctx.fillStyle={s:'#6dbf5c',m:'#e8c14a',l:'#e88a3c',p:'#e8566c',d:'#9f7cf0',j:'#5fd0e8',k:'#5fd0e8',u:'#f0c24a',w:'#49c8f0',g:'#d0d6de'}[j.kind];
+    ctx.beginPath();ctx.moveTo(px,py(j.x)-6);ctx.lineTo(px-4,py(j.x)-13);
+    ctx.lineTo(px+4,py(j.x)-13);ctx.closePath();ctx.fill();
+  }
+  const mx=PX+PW*BEHIND/(AHEAD+BEHIND);
+  ctx.fillStyle='#ff8a4c';ctx.beginPath();ctx.arc(mx,py(P.x)-4,3.5,0,6.3);ctx.fill();
+  ctx.fillStyle='#5f7a66';ctx.font='bold 8px Verdana,sans-serif';
+  ctx.fillText('ROAD AHEAD',PX+2,PY-10);
+
+  if(P.won){
+    ctx.fillStyle='rgba(10,20,16,.86)';ctx.fillRect(0,0,W,H);
+    ctx.textAlign='center';ctx.font='bold 24px Verdana,sans-serif';
+    t('FINISHED',W/2,H/2-70,'#ffcf9a');
+    ctx.font='bold 12px Verdana,sans-serif';
+    const ws=P.won/60;
+    t('time  '+Math.floor(ws/60)+':'+String(Math.floor(ws%60)).padStart(2,'0'),W/2,H/2-24,'#cfe0bb');
+    t('top speed  '+P.best.toFixed(1),W/2,H/2-4,'#d6f27a');
+    t('attempts  '+attempts,W/2,H/2+16,'#ff6b6b');
+    t('press R to ride it again',W/2,H/2+50,'#7fa87f');
+    ctx.textAlign='left';}
+}
+
+let acc=0,last=performance.now();
+function loop(now){acc+=Math.min(100,now-last);last=now;
+  while(acc>=16.6667){step();acc-=16.6667;}
+  draw();requestAnimationFrame(loop);}
+reset();buildDecor();requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
