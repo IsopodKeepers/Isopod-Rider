@@ -296,7 +296,7 @@ const gSm=x=>{
 };
 // a centred sample straddles a jump lip and reports the cliff instead of the ramp,
 // which poisons the takeoff attitude. Fall back to one-sided near a discontinuity.
-function angAt(x){const d=7,a=gAt(x-d),b=gAt(x),c=gAt(x+d);
+function angAt(x){const d=7,a=gSm(x-d),b=gSm(x),c=gSm(x+d);
   if(Math.abs(c-b)>14)return Math.atan2(b-a,d);
   if(Math.abs(b-a)>14)return Math.atan2(c-b,d);
   return Math.atan2(c-a,2*d);}
@@ -524,9 +524,9 @@ function step(){
 
     P.spin=P.spd/R;P.rot+=P.spin;P.vrot=(P.vrot||0)+Math.sign(P.spin)*Math.min(VSPIN_MAX,Math.abs(P.spin)*VSPIN);
     P.lean=a;
-    const ox=P.x, oy=gAt(P.x);
+    const ox=P.x, oy=gSm(P.x);
     P.x+=P.spd*Math.cos(a);
-    const ny=gAt(P.x), vy=ny-oy;
+    const ny=gSm(P.x), vy=ny-oy;
     if(vy-P.prevVy>GRAV*2.1/T&&P.spd>2.5*T){                 // ground dropped away: airborne
       // Leave from the point we were actually standing on. Advancing x first and
       // keeping the old y buried the isopod inside steep climbing faces -- it then
@@ -567,7 +567,7 @@ function step(){
     const pr=P.rot;
     P.rot=angLerp(P.rot,P.lean,0.22);         // spin settles into the lean
     P.spin=norm(P.rot-pr);P.vrot=(P.vrot||0)+P.spin;   // in the air the plates lock to the body
-    const g=gAt(P.x);
+    const g=gSm(P.x);
     // Test whether we CROSSED the surface, not whether we happen to be falling.
     // Requiring vy>0 meant flying upward into a climbing face -- the takeoff ramp
     // of a dirt jump -- registered no collision at all, and you went through it.
@@ -811,7 +811,7 @@ function draw(){
 
   // Smooth the DRAWN height only -- physics is untouched. Smoothing is applied to the offset above the dirt, not to y itself, so the pod
   // tracks the slope exactly at any speed instead of lagging behind it.
-  const base=(P.ground&&!P.rail)?gAt(P.x)-R:P.y,off=P.y-base;
+  const base=(P.ground&&!P.rail)?gSm(P.x)-R:P.y,off=P.y-base;
   if(P.smOff===undefined||!P.ground||P.rail)P.smOff=off;
   P.smOff+=(off-P.smOff)*0.45;
   P.smY=base+P.smOff;
