@@ -670,8 +670,40 @@ function land(g){
 let decor=[];
 function buildDecor(){decor=[];let s=7331;
   const rnd=()=>(s=(s*1103515245+12345)&0x7fffffff)/0x7fffffff;
-  for(let x=-200;x<LEN+400;x+=64)decor.push({x:x+rnd()*36,s:.28,h:70+rnd()*80,w:16+rnd()*20,k:rnd()});
-  for(let x=-200;x<LEN+400;x+=104)decor.push({x:x+rnd()*50,s:.55,h:110+rnd()*90,w:24+rnd()*28,k:rnd()});}
+  for(let x=-200;x<LEN+400;x+=96)decor.push({x:x+rnd()*36,s:.28,h:70+rnd()*80,w:16+rnd()*20,k:rnd()});
+  for(let x=-200;x<LEN+400;x+=150)decor.push({x:x+rnd()*50,s:.55,h:110+rnd()*90,w:24+rnd()*28,k:rnd()});}
+
+// Background plant: a stem with a seven-finger serrated leaf fanning out at the top,
+// and a smaller leaf pair lower down. Drawn as flat silhouettes in one colour.
+function leafBlade(len,wid){
+  ctx.beginPath();ctx.moveTo(0,0);
+  const n=7;
+  for(let i=1;i<=n;i++){const t=i/n,w=wid*Math.sin(t*Math.PI)*(1-t*0.35),y=-len*t;
+    ctx.lineTo(-w,y+len/n*0.45);ctx.lineTo(-w*0.86,y);}
+  ctx.lineTo(0,-len-wid*0.6);
+  for(let i=n;i>=1;i--){const t=i/n,w=wid*Math.sin(t*Math.PI)*(1-t*0.35),y=-len*t;
+    ctx.lineTo(w*0.86,y);ctx.lineTo(w,y+len/n*0.45);}
+  ctx.closePath();ctx.fill();
+}
+function leafFan(x,y,size,ang,k){
+  ctx.save();ctx.translate(x,y);ctx.rotate(ang);
+  const spread=[-1.55,-1.05,-0.5,0,0.5,1.05,1.55],lens=[0.42,0.62,0.86,1,0.86,0.62,0.42];
+  for(let i=0;i<7;i++){ctx.save();ctx.rotate(spread[i]+(k-0.5)*0.08);leafBlade(size*lens[i],size*0.11*(0.7+lens[i]*0.4));ctx.restore();}
+  ctx.restore();
+}
+function plant(x,y,h,stemW,col,k){
+  ctx.fillStyle=col;ctx.strokeStyle=col;ctx.lineCap='round';
+  const top=y-h,sway=(k-0.5)*h*0.25;
+  ctx.lineWidth=stemW;ctx.beginPath();ctx.moveTo(x,y+520);ctx.quadraticCurveTo(x,y-h*0.4,x+sway,top);ctx.stroke();
+  leafFan(x+sway,top,h*0.75,(k-0.5)*0.3,k);
+  const my=y-h*0.42,mx=x+sway*0.35;
+  ctx.lineWidth=stemW*0.7;
+  ctx.beginPath();ctx.moveTo(mx,my);ctx.lineTo(mx-h*0.18,my-h*0.12);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(mx,my+h*0.1);ctx.lineTo(mx+h*0.18,my-h*0.02);ctx.stroke();
+  leafFan(mx-h*0.18,my-h*0.12,h*0.4,-0.9,k);
+  leafFan(mx+h*0.18,my-h*0.02,h*0.4,0.9,1-k);
+  ctx.lineCap='butt';
+}
 
 // Terrain: dark dirt with a lighter topsoil band, an inked outline along the surface,
 // a green grass strip with tufts, and hashed pebbles / roots so nothing is random per frame.
@@ -726,10 +758,8 @@ function draw(){
 
   for(const d of decor){
     const px=Math.round(d.x-CX*d.s),py=Math.round(240-CY*d.s);
-    if(px<-100||px>W+100)continue;
-    ctx.fillStyle=d.s<.4?'#143829':'#1a4832';
-    ctx.fillRect(px,py-d.h,d.w,d.h+520);
-    ctx.beginPath();ctx.arc(px+d.w/2,py-d.h,22+d.k*18,0,6.3);ctx.fill();}
+    if(px<-160||px>W+160)continue;
+    plant(px+d.w/2,py,d.h,1.4+d.w/16,d.s<.4?'#143829':'#1a4832',d.k);}
 
   ground(CX,CY);
 
