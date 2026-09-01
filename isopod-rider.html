@@ -33,17 +33,20 @@ addEventListener('resize',fit);fit();
 
 /* ---------- tuning ---------- */
 const T=0.80;                 // time scale: same track, played slower
+const VSPIN=0.65, VSPIN_MAX=0.5;  // pattern turns at this fraction of the real roll, capped just under one plate per frame so it never strobes
 const GRAV=0.34*T*T, AIR=0.86;   // floatier air = more hang off every crest        // air is a touch floaty, flash-game style
 const ACCEL=0.190*T*T, BRAKE=0.22*T*T, SLOPE=0.165*T*T, DRAG=0.010*T*T,
       QDRAG=0.000544, CDRAG=0.0000047/T;   // v^2 term is scale-free; v^3 term needs 1/T
 const LEAN=0.055*T, R=11;
-// Real isopod morphs -- these are the varieties people actually keep.
+// sh = shell body, bd = rim + plate seams, hi = highlight, hd = head, lg = legs, dk = eye/antennae.
+// sm = per-seam colours (optional) for shells whose lines are mixed colours.
 const PODS=[
-  {n:'RUBBER DUCKY', dk:'#a8471d', bd:'#ff8a4c', hi:'#ffcf9a', hd:'#ffe0b8', lg:'#5e2410'},
-  {n:'PANDA KING',   dk:'#33333c', bd:'#f0f0ea', hi:'#ffffff', hd:'#ffffff', lg:'#232329'},
-  {n:'DAIRY COW',    dk:'#6b5a3e', bd:'#efe6cf', hi:'#fff8e6', hd:'#fffdf4', lg:'#463a26'},
-  {n:'ZEBRA',        dk:'#4a4a54', bd:'#c9c9c2', hi:'#eeeee6', hd:'#ffffff', lg:'#2f2f36'},
-  {n:'BLUE GHOST',   dk:'#2b5aa8', bd:'#6fb2f0', hi:'#c2e4ff', hd:'#e6f4ff', lg:'#1d3d73'},
+  {n:"DAN'S COSMIC DUST", sh:'#151515', dk:'#3a3a3a', bd:'#ff7ec8', hi:'#ffffff', hd:'#e6e6e6', lg:'#232329',
+     sm:['#ff7ec8','#5cf07a','#ff7ec8','#ffe95c','#ff7ec8','#3a3a3a','#ff7ec8','#ff7ec8']},
+  {n:'EMBER BEE',      sh:'#151515', dk:'#a8471d', bd:'#ff8a4c', hi:'#ffcf9a', hd:'#ffe0b8', lg:'#5e2410'},
+  {n:'CHERRY BLOSSOM', sh:'#ff7eb6', dk:'#b0416f', bd:'#ffb3d1', hi:'#ffe0ee', hd:'#ffd6e6', lg:'#7a2c4c'},
+  {n:'ZEBRA',          sh:'#151515', dk:'#4a4a54', bd:'#f0f0ea', hi:'#ffffff', hd:'#ffffff', lg:'#232329'},
+  {n:'GLACIER',        sh:'#ffffff', dk:'#8aa4b8', bd:'#d3dee7', hi:'#ffffff', hd:'#f4f8fb', lg:'#6b8296'},
 ];
 let podIdx=0, started=false;
 const waters=[];   // {a,b,y} spans where falling below the surface drowns you
@@ -423,7 +426,7 @@ function reset(keepTry){build();if(!keepTry)attempts=1;P.best=0;P.crashes=0;P.ti
   P.spawn={x:40,y:gAt(40)-R};respawn();cam.x=P.x-W/2;cam.y=P.y-H/2;}
 function respawn(){
   P.x=P.spawn.x;P.y=P.spawn.y;P.spd=4*T;P.vx=4*T;P.vy=0;
-  P.ground=true;P.ang=0;P.lean=0;P.rot=0;P.curl=1;P.prevVy=0;
+  P.ground=true;P.ang=0;P.lean=0;P.rot=0;P.vrot=0;P.curl=1;P.prevVy=0;
   P.air=0;P.dead=0;P.press=0;P.wasLoad=false;P.relT=-999;P.relAmt=0;P.popQ=0;P.cased=0;P.splat=0;P.rail=null;fx.length=0;
 }
 function note(t,c){fx.push({t:0,text:t,col:c,x:P.x,y:P.y-30});}
@@ -471,7 +474,7 @@ function step(){
     const rd=6,ra=Math.atan2(railYat(P.rail,P.x+rd)-railYat(P.rail,P.x-rd),2*rd);
     // no rolling on steel -- he stands and slides, body lying along the bar
     P.spin=(P.spin||0)*0.80;          // bleed off the roll; steel does not spin you
-    P.rot=angLerp(P.rot,ra,0.30);
+    const pr=P.rot;P.rot=angLerp(P.rot,ra,0.30);P.vrot=(P.vrot||0)+norm(P.rot-pr);
     P.ang=ra;P.lean=ra;
     P.x+=P.spd*Math.cos(ra);P.y=railYat(P.rail,P.x)-R;P.prevVy=0;
     P.grindT=(P.grindT||0)+1;
@@ -516,7 +519,7 @@ function step(){
     P.spd-=DRAG+P.spd*P.spd*QDRAG+P.spd*P.spd*P.spd*CDRAG;   // resistance, steep at the top end
     if(P.spd<0)P.spd=0;
 
-    P.spin=P.spd/R;P.rot+=P.spin;   // record the roll rate; the shell blur needs it
+    P.spin=P.spd/R;P.rot+=P.spin;P.vrot=(P.vrot||0)+Math.sign(P.spin)*Math.min(VSPIN_MAX,Math.abs(P.spin)*VSPIN);
     P.lean=a;
     const ox=P.x, oy=gAt(P.x);
     P.x+=P.spd*Math.cos(a);
@@ -560,7 +563,7 @@ function step(){
     P.x+=P.vx;P.y+=P.vy;
     const pr=P.rot;
     P.rot=angLerp(P.rot,P.lean,0.22);         // spin settles into the lean
-    P.spin=norm(P.rot-pr);
+    P.spin=norm(P.rot-pr);P.vrot=(P.vrot||0)+P.spin;   // in the air the plates lock to the body
     const g=gAt(P.x);
     // Test whether we CROSSED the surface, not whether we happen to be falling.
     // Requiring vy>0 meant flying upward into a climbing face -- the takeoff ramp
@@ -653,6 +656,50 @@ function buildDecor(){decor=[];let s=7331;
   for(let x=-200;x<LEN+400;x+=64)decor.push({x:x+rnd()*36,s:.28,h:70+rnd()*80,w:16+rnd()*20,k:rnd()});
   for(let x=-200;x<LEN+400;x+=104)decor.push({x:x+rnd()*50,s:.55,h:110+rnd()*90,w:24+rnd()*28,k:rnd()});}
 
+// Terrain: dark dirt with a lighter topsoil band, an inked outline along the surface,
+// a green grass strip with tufts, and hashed pebbles / roots so nothing is random per frame.
+const hsh=n=>{n=(n*2654435761)>>>0;n^=n>>>15;n=(n*2246822519)>>>0;return (n^(n>>>13))>>>0;};
+function ground(CX,CY){
+  const ST=4;   // sample step
+  const path=(off)=>{ctx.beginPath();
+    for(let sx=-ST;sx<=W+ST;sx+=ST){const y=gAt(CX+sx)-CY+off;sx===-ST?ctx.moveTo(sx,y):ctx.lineTo(sx,y);}};
+  const closeDown=()=>{ctx.lineTo(W+ST,H+20);ctx.lineTo(-ST,H+20);ctx.closePath();};
+  ctx.lineJoin='round';ctx.lineCap='round';
+  // deep dirt
+  path(0);closeDown();ctx.fillStyle='#4a2f1a';ctx.fill();
+  // topsoil band
+  path(0);for(let sx=W+ST;sx>=-ST;sx-=ST)ctx.lineTo(sx,gAt(CX+sx)-CY+38);ctx.closePath();
+  ctx.fillStyle='#6b4527';ctx.fill();
+  // wavy seam between the layers
+  ctx.strokeStyle='#3d2614';ctx.lineWidth=3;ctx.beginPath();
+  for(let sx=-ST;sx<=W+ST;sx+=ST){const wx=CX+sx,y=gAt(wx)-CY+52+Math.sin(wx*0.021)*4+Math.sin(wx*0.0073)*6;
+    sx===-ST?ctx.moveTo(sx,y):ctx.lineTo(sx,y);}
+  ctx.stroke();
+  // pebbles and roots, hashed on world x so they stay put as the camera moves
+  ctx.fillStyle='#3d2614';ctx.strokeStyle='#3d2614';ctx.lineWidth=1.6;
+  for(let wx=Math.floor(CX/12)*12;wx<CX+W+12;wx+=12){
+    const h=hsh(wx),sx=wx-CX;
+    if((h&7)<2){const d=44+(h>>3)%70,r=1.5+((h>>10)&3)*0.6;
+      ctx.beginPath();ctx.ellipse(sx+((h>>5)&7),gAt(wx)-CY+d,r*1.3,r,0,0,6.3);ctx.fill();}
+    if((h>>13)%9===0){const gy=gAt(wx)-CY+38,L=16+(h>>16)%22,sw=((h>>20)&1?1:-1)*(3+(h>>21)%5);
+      ctx.beginPath();ctx.moveTo(sx,gy);ctx.quadraticCurveTo(sx+sw,gy+L*0.5,sx-sw*0.4,gy+L);ctx.stroke();
+      if(h&0x400000){ctx.beginPath();ctx.moveTo(sx+sw*0.5,gy+L*0.45);ctx.lineTo(sx+sw*1.6,gy+L*0.8);ctx.stroke();}}
+  }
+  // grass strip and inked surface line
+  path(-1);for(let sx=W+ST;sx>=-ST;sx-=ST)ctx.lineTo(sx,gAt(CX+sx)-CY+6);ctx.closePath();
+  ctx.fillStyle='#3f7a2f';ctx.fill();
+  path(1.5);ctx.strokeStyle='#2a1a0c';ctx.lineWidth=3.5;ctx.stroke();
+  // tufts: a few thin blades leaning with the slope, in two greens
+  for(let wx=Math.floor(CX/6)*6;wx<CX+W+6;wx+=6){
+    const h=hsh(wx*3+1);if((h&15)>5)continue;
+    const sx=wx-CX,gy=gAt(wx)-CY,n=2+(h>>4)%2,tall=5+(h>>6)%6;
+    ctx.strokeStyle=(h>>9)&1?'#6fae43':'#4f8f36';ctx.lineWidth=1.5;
+    for(let i=0;i<n;i++){const ox=(i-(n-1)/2)*2.2,lean=((h>>(12+i*3))%5-2)*1.1;
+      ctx.beginPath();ctx.moveTo(sx+ox,gy+1);ctx.quadraticCurveTo(sx+ox+lean*0.5,gy-tall*0.55,sx+ox+lean,gy-tall);ctx.stroke();}
+  }
+  ctx.lineCap='butt';
+}
+
 function draw(){
   const CX=Math.round(cam.x),CY=Math.round(cam.y);
   const sky=ctx.createLinearGradient(0,0,0,H);
@@ -666,15 +713,7 @@ function draw(){
     ctx.fillRect(px,py-d.h,d.w,d.h+520);
     ctx.beginPath();ctx.arc(px+d.w/2,py-d.h,22+d.k*18,0,6.3);ctx.fill();}
 
-  for(let sx=0;sx<W;sx++){
-    const wx=CX+sx,sy=Math.round(gAt(wx)-CY);
-    if(sy>H)continue;
-    ctx.fillStyle='#8f5d31';ctx.fillRect(sx,sy,1,3);
-    ctx.fillStyle='#6d4423';ctx.fillRect(sx,sy+3,1,8);
-    ctx.fillStyle='#553417';ctx.fillRect(sx,sy+11,1,22);
-    ctx.fillStyle='#3a230f';ctx.fillRect(sx,sy+33,1,H);
-    if((wx*7919%41)===0){ctx.fillStyle='#a06f3d';ctx.fillRect(sx,sy+1,1,2);}
-    if((wx%14)===0){ctx.fillStyle='#427f42';ctx.fillRect(sx,sy-2,1,2);}}
+  ground(CX,CY);
 
   // WATER: filled per column between the surface and the ground beneath it, so it
   // sits in the basin instead of covering the terrain as a flat slab.
@@ -799,15 +838,7 @@ function startScreen(){
     ctx.strokeRect(px-52,y-52,104,124);
     // a curled pod in that colour
     ctx.save();ctx.translate(px,y);ctx.rotate(-0.25);
-    const r=26;
-    ctx.fillStyle=p.dk;ctx.beginPath();ctx.ellipse(0,0,r,r,0,0,6.3);ctx.fill();
-    ctx.fillStyle=p.bd;ctx.beginPath();ctx.ellipse(0,-1,r-3.5,r-3.5,0,0,6.3);ctx.fill();
-    ctx.strokeStyle=p.dk;ctx.lineWidth=2.6;
-    for(let k=-3;k<=3;k++){const sx=k*(r/4.1),kk=1-Math.abs(k)/4.6;
-      ctx.beginPath();ctx.moveTo(sx,-r*kk+2);ctx.lineTo(sx,r*kk-2);ctx.stroke();}
-    ctx.fillStyle=p.hi;ctx.beginPath();ctx.ellipse(2,-r*.5,r*.42,3.6,0,0,6.3);ctx.fill();
-    ctx.fillStyle=p.hd;ctx.beginPath();ctx.ellipse(r*.62,0,r*.26,r*.66,0,0,6.3);ctx.fill();
-    ctx.fillStyle=p.lg;ctx.beginPath();ctx.arc(r*.74,-r*.2,3,0,6.3);ctx.fill();
+    shell(26,p);
     ctx.restore();
     ctx.font='bold 9px Verdana,sans-serif';
     ctx.fillStyle=sel?'#d6f27a':'#6f8a72';ctx.fillText(p.n,px,y+40);
@@ -822,52 +853,68 @@ function startScreen(){
   ctx.textAlign='left';
 }
 
+// The rolled-up shell: a dark disc with a thick rim in the pod's body colour and
+// eight plate seams spiralling out from a slightly off-centre hub to the rim.
+function shell(r,p){
+  ctx.fillStyle=p.sh;ctx.beginPath();ctx.arc(0,0,r,0,6.3);ctx.fill();
+  ctx.strokeStyle=p.bd;ctx.lineCap='butt';ctx.lineJoin='round';
+  const hx=r*0.08,hy=r*0.04,n=8,lw=r*0.12;
+  ctx.lineWidth=lw;
+  for(let i=0;i<n;i++){const a=i/n*6.2832;
+    const ex=hx+Math.cos(a)*r*0.9, ey=hy+Math.sin(a)*r*0.9;
+    const am=a-0.5, cx=hx+Math.cos(am)*r*0.55, cy=hy+Math.sin(am)*r*0.55;
+    if(p.sm)ctx.strokeStyle=p.sm[i];
+    ctx.beginPath();ctx.moveTo(hx,hy);ctx.quadraticCurveTo(cx,cy,ex,ey);ctx.stroke();}
+  ctx.strokeStyle=p.bd;ctx.beginPath();ctx.arc(0,0,r-lw*0.5,0,6.3);ctx.stroke();   // rim last so seam ends tuck under it
+  ctx.fillStyle=p.bd;ctx.beginPath();ctx.arc(hx,hy,r*0.1,0,6.3);ctx.fill();
+  ctx.fillStyle=p.hi;ctx.globalAlpha=0.3;
+  ctx.beginPath();ctx.ellipse(-r*.25,-r*.55,r*.3,r*.08,-0.4,0,6.3);ctx.fill();
+  ctx.globalAlpha=1;
+}
+
 function pod(x,y){
   const o=1-P.curl;                       // 0 = balled, 1 = splayed out
   const gr=P.rail?Math.min(1,(P.grindT||0)/8):0;   // how settled into the grind stance
-  ctx.save();ctx.translate(x,y);ctx.rotate(P.rot);
   const sq=P.splat>0?Math.min(1,(48/T-P.splat)/(6/T)):0;      // pancaked on impact
-  const len=R*(1+o*.10+gr*0.34)*(1+sq*0.85),hgt=R*(1-o*.06-gr*0.20)*(1-sq*0.62);
+  const fly=(!P.ground&&!P.rail)?o:0;   // airborne and open: spread out and glide
+  // physics keeps the centre R straight above the dirt, which sinks the ball into a
+  // slope by R/cos(a)-R; lift the drawing so the ball sits tangent to the face
+  const lift=(P.ground&&!P.rail&&!P.splat)?Math.min(R*0.6,R/Math.max(0.5,Math.cos(P.ang))-R):0;
+  ctx.save();ctx.translate(x,y-lift);ctx.rotate(P.rot);
+  const len=R*(1+o*.10+gr*0.34+fly*0.30)*(1+sq*0.85),hgt=R*(1-o*.06-gr*0.20-fly*0.16)*(1-sq*0.62);
   if(o>.05){ctx.globalAlpha=Math.min(1,o*1.6);
     ctx.strokeStyle=C().lg;ctx.lineWidth=1.6+gr*0.7;
-    for(let i=0;i<6;i++){const lx=-len*.62+i*(len*.25);
-      // grinding: legs braced straight down onto the bar. otherwise they paddle.
-      const sw=gr>0 ? lx*-0.30 : Math.sin(P.time*.22+i)*1.4*o;
-      const reach=hgt*.72+(3.2*o)+gr*5.5;
-      ctx.beginPath();ctx.moveTo(lx,hgt*.7);ctx.lineTo(lx+sw,reach);ctx.stroke();}
+    if(fly>0){
+      // flying: legs fan out above and below like wings, trailing back, with a slow flap
+      const flap=Math.sin(P.time*.18)*2.2*fly;
+      for(let i=0;i<3;i++){const lx=-len*.45+i*(len*.36);
+        for(const s of [-1,1]){
+          const sp=(6+i*1.5)*fly, back=(4+i*2)*fly;
+          ctx.beginPath();ctx.moveTo(lx,s*hgt*.55);
+          ctx.lineTo(lx-back*0.5,s*(hgt*.55+sp*0.6+flap*0.5));
+          ctx.lineTo(lx-back,s*(hgt*.55+sp+flap));ctx.stroke();}}
+    }else{
+      for(let i=0;i<6;i++){const lx=-len*.62+i*(len*.25);
+        // grinding: legs braced straight down onto the bar. otherwise they paddle.
+        const sw=gr>0 ? lx*-0.30 : Math.sin(P.time*.22+i)*1.4*o;
+        const reach=hgt*.72+(3.2*o)+gr*5.5;
+        ctx.beginPath();ctx.moveTo(lx,hgt*.7);ctx.lineTo(lx+sw,reach);ctx.stroke();}
+    }
     ctx.globalAlpha=1;}
-  ctx.fillStyle=C().dk;ctx.beginPath();ctx.ellipse(0,0,len,hgt,0,0,6.3);ctx.fill();
-  ctx.fillStyle=C().bd;ctx.beginPath();ctx.ellipse(0,-.5,len-1.5,hgt-1.5,0,0,6.3);ctx.fill();
-  // Above ~0.6 rad/frame the 7 plates advance more than one plate per frame and
-  // strobe. Fade them out and fall back to concentric rings, which are rotationally
-  // symmetric and so cannot alias.
-  const sp=Math.abs(P.spin)||0;
-  const blur=Math.max(0,Math.min(1,(sp-0.55)/0.85));
-  if(blur<1){
-    ctx.globalAlpha=1-blur;
-    ctx.strokeStyle=C().dk;ctx.lineWidth=1.3;
-    for(let i=-3;i<=3;i++){const px=i*(len/4.1),k=1-Math.abs(i)/4.6;
-      ctx.beginPath();ctx.moveTo(px,-hgt*k);ctx.lineTo(px,hgt*k);ctx.stroke();}
-    ctx.globalAlpha=1;
-  }
-  if(blur>0){
-    ctx.globalAlpha=blur*0.55;
-    ctx.strokeStyle=C().dk;ctx.lineWidth=1.6;
-    for(const f of [0.42,0.72]){
-      ctx.beginPath();ctx.ellipse(0,0,len*f,hgt*f,0,0,6.3);ctx.stroke();}
-    ctx.globalAlpha=1;
-  }
-  ctx.fillStyle=C().hi;ctx.beginPath();ctx.ellipse(len*.1,-hgt*.48,len*.42,1.7,0,0,6.3);ctx.fill();
-  // bright head plate: always visible, so your lean angle is readable even balled up
-  ctx.fillStyle=C().hd;
-  ctx.beginPath();ctx.ellipse(len*.66,0,len*.26,hgt*.72,0,0,6.3);ctx.fill();
+  // the plate pattern turns at a fraction of the true roll (wagon-wheel) so it stays readable
+  ctx.save();ctx.scale(len/R,hgt/R);ctx.rotate((P.vrot||0)-P.rot);shell(R,C());ctx.restore();
+  // head plate shows as he unfurls, so the lean angle reads when it matters
+  if(o>.05){ctx.globalAlpha=Math.min(1,o*1.6);
+    ctx.fillStyle=C().hd;
+    ctx.beginPath();ctx.ellipse(len*(.66+fly*.08),0,len*.26,hgt*.72,0,0,6.3);ctx.fill();
+    ctx.globalAlpha=1;}
   if(P.press>0.08){                      // charge ring: brighter the more you have loaded
     ctx.globalAlpha=0.25+P.press*0.6;
     ctx.strokeStyle=P.press>0.75?'#d6f27a':'#9ff0c0';ctx.lineWidth=2;
     ctx.beginPath();ctx.arc(0,0,R+3+P.press*3,0,6.3*Math.min(1,P.press));ctx.stroke();
     ctx.globalAlpha=1;}
-  ctx.fillStyle=C().lg;ctx.beginPath();ctx.arc(len*.78,-hgt*.2,1.6,0,6.3);ctx.fill();
   if(o>.05){ctx.globalAlpha=Math.min(1,o*1.6);
+    ctx.fillStyle=C().lg;ctx.beginPath();ctx.arc(len*.78,-hgt*.2,1.6,0,6.3);ctx.fill();
     ctx.fillStyle=C().dk;ctx.beginPath();ctx.ellipse(len*.88,0,3.2,hgt*.6,0,0,6.3);ctx.fill();
     ctx.fillStyle='#141414';ctx.fillRect(len*.9,-2,2,2);
     ctx.strokeStyle=C().dk;ctx.lineWidth=1.4;
