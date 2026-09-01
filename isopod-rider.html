@@ -33,7 +33,7 @@ addEventListener('resize',fit);fit();
 
 /* ---------- tuning ---------- */
 const T=0.80;                 // time scale: same track, played slower
-const VSPIN=0.35;  // shell pattern turns at this fraction of the real roll so it never smears
+const VSPIN=0.65, VSPIN_MAX=0.5;  // pattern turns at this fraction of the real roll, capped just under one plate per frame so it never strobes
 const GRAV=0.34*T*T, AIR=0.86;   // floatier air = more hang off every crest        // air is a touch floaty, flash-game style
 const ACCEL=0.190*T*T, BRAKE=0.22*T*T, SLOPE=0.165*T*T, DRAG=0.010*T*T,
       QDRAG=0.000544, CDRAG=0.0000047/T;   // v^2 term is scale-free; v^3 term needs 1/T
@@ -519,7 +519,7 @@ function step(){
     P.spd-=DRAG+P.spd*P.spd*QDRAG+P.spd*P.spd*P.spd*CDRAG;   // resistance, steep at the top end
     if(P.spd<0)P.spd=0;
 
-    P.spin=P.spd/R;P.rot+=P.spin;P.vrot=(P.vrot||0)+P.spin*VSPIN;
+    P.spin=P.spd/R;P.rot+=P.spin;P.vrot=(P.vrot||0)+Math.sign(P.spin)*Math.min(VSPIN_MAX,Math.abs(P.spin)*VSPIN);
     P.lean=a;
     const ox=P.x, oy=gAt(P.x);
     P.x+=P.spd*Math.cos(a);
@@ -563,7 +563,7 @@ function step(){
     P.x+=P.vx;P.y+=P.vy;
     const pr=P.rot;
     P.rot=angLerp(P.rot,P.lean,0.22);         // spin settles into the lean
-    P.spin=norm(P.rot-pr);P.vrot=(P.vrot||0)+P.spin*VSPIN;
+    P.spin=norm(P.rot-pr);P.vrot=(P.vrot||0)+Math.sign(P.spin)*Math.min(VSPIN_MAX,Math.abs(P.spin)*VSPIN);
     const g=gAt(P.x);
     // Test whether we CROSSED the surface, not whether we happen to be falling.
     // Requiring vy>0 meant flying upward into a climbing face -- the takeoff ramp
