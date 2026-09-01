@@ -413,7 +413,7 @@ cv.addEventListener('mousedown',e=>{
   const r=cv.getBoundingClientRect();
   const mx=(e.clientX-r.left)*(W/r.width), my=(e.clientY-r.top)*(H/r.height);
   if(!started){
-    const n=PODS.length,gap=126,x0=W/2-(n-1)*gap/2,y=H/2-40;
+    const n=PODS.length,gap=126,x0=W/2-(n-1)*gap/2,y=H/2-30;
     for(let i=0;i<n;i++){const px=x0+i*gap;
       if(mx>px-52&&mx<px+52&&my>y-52&&my<y+72){
         if(podIdx===i){started=true;SND.start();} else podIdx=i;   // click to select, click again to ride
@@ -856,31 +856,122 @@ function button(x,y,w,h,label){
   ctx.textBaseline='alphabetic';
 }
 
+/* start screen decorations: stars, leaves, vines */
+const PLUM='#4a2a55',PLUM_DK='#2e1838',GOLD='#f2b233',GOLD_DK='#c9821a',GOLD_LT='#ffd76a';
+function star(x,y,r,col){
+  ctx.fillStyle=col;ctx.beginPath();
+  for(let i=0;i<10;i++){const a=-Math.PI/2+i*Math.PI/5,q=i%2?r*.45:r;
+    ctx.lineTo(x+Math.cos(a)*q,y+Math.sin(a)*q);}
+  ctx.closePath();ctx.fill();
+}
+function sparkle(x,y,r,col){
+  ctx.fillStyle=col;ctx.beginPath();
+  ctx.moveTo(x,y-r);ctx.quadraticCurveTo(x,y,x+r,y);ctx.quadraticCurveTo(x,y,x,y+r);
+  ctx.quadraticCurveTo(x,y,x-r,y);ctx.quadraticCurveTo(x,y,x,y-r);ctx.fill();
+}
+function leaf(x,y,ang,len,col,dk){
+  ctx.save();ctx.translate(x,y);ctx.rotate(ang);
+  ctx.fillStyle=col;ctx.beginPath();ctx.moveTo(0,0);
+  ctx.quadraticCurveTo(len*.5,-len*.42,len,0);ctx.quadraticCurveTo(len*.5,len*.42,0,0);ctx.fill();
+  ctx.strokeStyle=dk;ctx.lineWidth=1.2;ctx.beginPath();ctx.moveTo(2,0);ctx.lineTo(len-3,0);ctx.stroke();
+  ctx.restore();
+}
+function vine(x,y,dir){                       // a curling stem with leaves, dir=+1 grows right
+  ctx.strokeStyle='#4f8f36';ctx.lineWidth=2.5;ctx.lineCap='round';
+  ctx.beginPath();ctx.moveTo(x,y);ctx.bezierCurveTo(x+dir*30,y-18,x+dir*40,y+22,x+dir*78,y+6);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(x+dir*78,y+6);ctx.bezierCurveTo(x+dir*90,y+2,x+dir*94,y-8,x+dir*86,y-10);ctx.stroke();
+  const L=[[14,-10,-0.9],[30,4,0.7],[46,-2,-0.6],[60,10,0.9],[70,-6,-0.2]];
+  for(const [ox,oy,a] of L)leaf(x+dir*ox,y+oy,dir>0?a:Math.PI-a,16,'#6fae43','#3f7f2a');
+  ctx.lineCap='butt';
+}
+
 function startScreen(){
   ctx.fillStyle='rgba(20,40,30,.45)';ctx.fillRect(0,0,W,H);
   const PX=W/2-350,PY=24,PW=700,PH=338;
-  panel(PX,PY,PW,PH);
-  // green header band with the title
-  card(PX+14,PY+14,PW-28,74,UI.grass,UI.grassDk,10);
-  ctx.textAlign='center';ctx.textBaseline='alphabetic';
-  txt('ISOPOD RIDER',W/2,PY+50,30,'#ff8a5c','#3a2a1a',6);
-  txt('GAS  ·  LOAD  ·  FLY',W/2,PY+74,11,UI.cream,'#2b4d1e',3);
+  // plum outer frame, gold rim, cream face
+  ctx.fillStyle='rgba(0,0,0,.3)';rr(PX+2,PY+8,PW,PH,20);ctx.fill();
+  ctx.fillStyle=PLUM_DK;rr(PX-4,PY-4,PW+8,PH+8,20);ctx.fill();
+  ctx.fillStyle=GOLD;rr(PX-1,PY-1,PW+2,PH+2,17);ctx.fill();
+  ctx.fillStyle=UI.cream;rr(PX+4,PY+4,PW-8,PH-8,13);ctx.fill();
 
-  const n=PODS.length,gap=126,x0=W/2-(n-1)*gap/2,y=H/2-40;
-  const tint=[UI.card.p,UI.card.y,UI.card.p,UI.card.n,UI.card.b];
+  // header: starry plum band with rays, gold-rimmed, subtitle tab hanging below
+  const HY=PY+4,HH=66;
+  ctx.save();rr(PX+4,HY,PW-8,HH,13);ctx.clip();
+  const hg=ctx.createLinearGradient(0,HY,0,HY+HH);hg.addColorStop(0,'#3a1f45');hg.addColorStop(1,'#5a3068');
+  ctx.fillStyle=hg;ctx.fillRect(PX,HY,PW,HH);
+  ctx.fillStyle='rgba(255,255,255,.045)';
+  for(let i=0;i<12;i++){const a=Math.PI+i*Math.PI/12;ctx.beginPath();ctx.moveTo(W/2,HY+HH+30);
+    ctx.arc(W/2,HY+HH+30,700,a,a+Math.PI/24);ctx.closePath();ctx.fill();}
+  ctx.fillStyle='#f7e2a2';
+  for(let i=0;i<26;i++){const h=hsh(i*977+3);const sx=PX+10+(h%(PW-20)),sy=HY+6+((h>>10)%(HH-12));
+    if(Math.abs(sx-W/2)<235)continue;
+    ctx.globalAlpha=.35+((h>>20)%50)/100;ctx.beginPath();ctx.arc(sx,sy,1+((h>>26)%2),0,6.3);ctx.fill();}
+  ctx.globalAlpha=1;
+  sparkle(PX+110,HY+22,7,'#fff2c4');sparkle(PX+PW-120,HY+30,8,'#fff2c4');sparkle(PX+150,HY+66,4,'#fff2c4');sparkle(PX+PW-70,HY+62,4,'#fff2c4');
+  ctx.restore();
+  ctx.strokeStyle=GOLD;ctx.lineWidth=3;rr(PX+4,HY-6,PW-8,HH+6,13);ctx.stroke();
+  vine(PX+8,HY+30,1);vine(PX+PW-8,HY+30,-1);
+  // title: gold with plum outline and a drop shadow
+  ctx.textAlign='center';ctx.textBaseline='alphabetic';
+  ctx.font='bold 40px '+FONT;
+  ctx.lineJoin='round';ctx.strokeStyle=PLUM_DK;ctx.lineWidth=10;ctx.strokeText('Isopod Rider',W/2+2,HY+46+3);
+  ctx.strokeStyle='#6a3a58';ctx.lineWidth=8;ctx.strokeText('Isopod Rider',W/2,HY+46);
+  const tg=ctx.createLinearGradient(0,HY+12,0,HY+50);tg.addColorStop(0,GOLD_LT);tg.addColorStop(1,GOLD);
+  ctx.fillStyle=tg;ctx.fillText('Isopod Rider',W/2,HY+46);
+  // subtitle tab hanging off the band
+  ctx.fillStyle=PLUM;rr(W/2-90,HY+HH-4,180,20,8);ctx.fill();
+  ctx.strokeStyle=GOLD;ctx.lineWidth=2;rr(W/2-90,HY+HH-4,180,20,8);ctx.stroke();
+  txt('GAS',W/2-52,HY+HH+10,10,UI.cream);txt('LOAD',W/2,HY+HH+10,10,UI.cream);txt('FLY',W/2+50,HY+HH+10,10,UI.cream);
+  ctx.fillStyle='#8fd15a';ctx.beginPath();ctx.arc(W/2-27,HY+HH+7,2.5,0,6.3);ctx.fill();ctx.beginPath();ctx.arc(W/2+26,HY+HH+7,2.5,0,6.3);ctx.fill();
+
+  // pod cards: tinted face, wood or gold border, inner hairline, star ribbon
+  const n=PODS.length,gap=126,x0=W/2-(n-1)*gap/2,y=H/2-30;
+  const tint=[UI.card.n,UI.card.y,UI.card.p,'#efe6d8',UI.card.b];
+  const edge=['#c98a1a','#a9652a','#b9536a','#6a5545','#5f86a8'];
+  const starCol=['#f2b233','#e9843a','#e76b93','#7a5a3a','#3d7ec4'];
   for(let i=0;i<n;i++){
     const px=x0+i*gap,p=PODS[i],sel=i===podIdx;
-    card(px-52,y-52,104,124,sel?'#fff':tint[i],sel?UI.orange:UI.wood,12);
-    if(sel){ctx.strokeStyle=UI.orange;ctx.lineWidth=3;rr(px-52,y-52,104,124,12);ctx.stroke();}
-    // a curled pod in that colour
-    ctx.save();ctx.translate(px,y-6);ctx.rotate(-0.25);
-    shell(26,p);
-    ctx.restore();
-    txt(p.n,px,y+52,9,UI.ink);
+    ctx.fillStyle='rgba(0,0,0,.18)';rr(px-50,y-48,104,124,12);ctx.fill();
+    card(px-52,y-52,104,124,sel?'#fffaf0':tint[i],sel?GOLD:edge[i],12);
+    if(sel){ctx.strokeStyle=GOLD;ctx.lineWidth=4;rr(px-52,y-52,104,124,12);ctx.stroke();}
+    ctx.strokeStyle=sel?GOLD:edge[i];ctx.globalAlpha=.55;ctx.lineWidth=1;rr(px-46,y-46,92,112,8);ctx.stroke();ctx.globalAlpha=1;
+    // shell on a soft disc
+    ctx.fillStyle='rgba(0,0,0,.08)';ctx.beginPath();ctx.arc(px,y-4,33,0,6.3);ctx.fill();
+    ctx.save();ctx.translate(px,y-6);ctx.rotate(-0.25);shell(26,p);ctx.restore();
+    txt(p.n,px,y+50,9,UI.ink);
+    // star ribbon
+    const sc=starCol[i],ry=y+62;
+    ctx.strokeStyle=sc;ctx.globalAlpha=.6;ctx.lineWidth=1.2;
+    ctx.beginPath();ctx.moveTo(px-36,ry);ctx.lineTo(px-20,ry);ctx.moveTo(px+20,ry);ctx.lineTo(px+36,ry);ctx.stroke();
+    ctx.globalAlpha=1;
+    star(px,ry,5.5,sc);ctx.globalAlpha=.55;star(px-13,ry,3.5,sc);star(px+13,ry,3.5,sc);ctx.globalAlpha=1;
   }
   txt('click a pod twice, or press 1-'+n+' then SPACE',W/2,y+96,11,UI.ink);
-  button(W/2-130,y+108,260,40,'SPACE TO RIDE');
-  txt('gas: UP   ·   load / brake: SPACE   ·   lean: LEFT RIGHT   ·   M: sound',W/2,PY+PH-16,10,UI.wood);
+
+  // gold button in a plum frame with stars
+  const bx=W/2-160,by=y+106,bw=320,bh=42;
+  ctx.fillStyle='rgba(0,0,0,.25)';rr(bx+2,by+5,bw,bh,13);ctx.fill();
+  ctx.fillStyle=PLUM_DK;rr(bx-3,by-3,bw+6,bh+6,15);ctx.fill();
+  ctx.fillStyle=GOLD_DK;rr(bx,by,bw,bh,12);ctx.fill();
+  const bg=ctx.createLinearGradient(0,by,0,by+bh);bg.addColorStop(0,GOLD_LT);bg.addColorStop(1,GOLD);
+  ctx.fillStyle=bg;rr(bx+2.5,by+2.5,bw-5,bh-9,10);ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,.35)';rr(bx+8,by+5,bw-16,bh*.32,6);ctx.fill();
+  ctx.textBaseline='middle';txt('SPACE TO RIDE',W/2,by+bh/2-1,19,PLUM_DK);ctx.textBaseline='alphabetic';
+  star(bx+30,by+bh/2,7,'#fff2c4');star(bx+bw-30,by+bh/2,7,'#fff2c4');
+
+  // footer: controls between gold rules with a leaf at each end
+  const fy=PY+PH-18;
+  ctx.strokeStyle=GOLD;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(PX+30,fy);ctx.lineTo(PX+150,fy);ctx.moveTo(PX+PW-150,fy);ctx.lineTo(PX+PW-30,fy);ctx.stroke();
+  ctx.fillStyle=GOLD;ctx.beginPath();ctx.arc(PX+30,fy,3.5,0,6.3);ctx.arc(PX+PW-30,fy,3.5,0,6.3);ctx.fill();
+  leaf(PX+156,fy+2,-0.35,20,'#6fae43','#3f7f2a');leaf(PX+PW-156,fy+2,Math.PI+0.35,20,'#6fae43','#3f7f2a');
+  const items=['gas: UP','load / brake: SPACE','lean: LEFT RIGHT','M: sound'];
+  ctx.font='bold 10px '+FONT;
+  const widths=items.map(s=>ctx.measureText(s).width),total=widths.reduce((a,b)=>a+b,0)+(items.length-1)*26;
+  let cx=W/2-total/2;
+  for(let i=0;i<items.length;i++){
+    ctx.textAlign='left';txt(items[i],cx,fy+4,10,UI.wood);cx+=widths[i];
+    if(i<items.length-1){ctx.fillStyle='#8fd15a';ctx.beginPath();ctx.arc(cx+13,fy,2.5,0,6.3);ctx.fill();cx+=26;}
+  }
   ctx.textAlign='left';
 }
 
