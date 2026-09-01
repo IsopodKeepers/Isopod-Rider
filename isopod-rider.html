@@ -757,7 +757,7 @@ function draw(){
   ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
 
   for(const d of decor){
-    const px=Math.round(d.x-CX*d.s),py=Math.round(240-CY*d.s);
+    const px=Math.round(d.x-CX*d.s),py=Math.round(270+(d.k-0.5)*70-CY*d.s*0.1);
     if(px<-160||px>W+160)continue;
     plant(px+d.w/2,py,d.h,1.4+d.w/16,d.s<.4?'#143829':'#1a4832',d.k);}
 
