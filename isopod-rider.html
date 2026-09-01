@@ -424,7 +424,7 @@ cv.addEventListener('mousedown',e=>{
 
 /* ---------- state ---------- */
 const P={},cam={x:0,y:0},fx=[],dust=[],smoke=[];
-const BOOST_X=370, BOOST_MUL=1.15, BOOST_T=180, BOOST_R=R*3;   // one pickup at the start: +15% for 3 s
+const BOOST_X=370, BOOST_MUL=1.15, BOOST_T=180, BOOST_R=R*1.5;   // one pickup at the start: +15% for 3 s
 const boost={hit:false};
 let attempts=1;
 function reset(keepTry){build();if(!keepTry)attempts=1;P.best=0;P.crashes=0;P.time=0;P.won=0;
@@ -595,7 +595,7 @@ function step(){
     if(!hitRail&&P.y+R>=g&&(P.vy>0||P.y+R>g+2))land(g);
   }
 
-  if(!boost.hit&&Math.abs(P.x-BOOST_X)<BOOST_R&&Math.abs(P.y-(gAt(BOOST_X)-BOOST_R*0.6))<BOOST_R){
+  if(!boost.hit&&Math.abs(P.x-BOOST_X)<BOOST_R*1.4&&Math.abs(P.y-(gAt(BOOST_X)-BOOST_R*1.15))<BOOST_R*1.4){
     boost.hit=true;P.boost=BOOST_T;P.spd*=BOOST_MUL;if(!P.ground){P.vx*=BOOST_MUL;}
     note('BOOST!','#9fd8ff');SND.pop(1);
   }
@@ -824,7 +824,7 @@ function draw(){
   for(const s of smoke){ctx.globalAlpha=Math.max(0,1-s.t/s.life)*.55;
     ctx.fillStyle=s.t<6?'#e8eef4':'#9aa3ad';ctx.beginPath();ctx.arc(s.x-CX,s.y-CY,s.r,0,6.3);ctx.fill();}
   ctx.globalAlpha=1;
-  if(!boost.hit)emblem(BOOST_X-CX,gAt(BOOST_X)-BOOST_R*0.6-CY,BOOST_R*2/13);
+  if(!boost.hit)emblem(BOOST_X-CX,gAt(BOOST_X)-BOOST_R*1.15-CY,BOOST_R*2/14.3);
 
   // Smooth the DRAWN height only -- physics is untouched. Smoothing is applied to the offset above the dirt, not to y itself, so the pod
   // tracks the slope exactly at any speed instead of lagging behind it.
@@ -842,20 +842,23 @@ function draw(){
   if(started)hud();else startScreen();
 }
 
-// speed-booster emblem: three grey crystal points over a dark shield with a white spine.
-// s = pixels per unit; the shape is 13 units tall, centred on (x,y). Bobs gently.
+// speed-booster emblem, traced from the reference art: deep-V dark shield, three tall
+// crystal spikes meeting at one point, bone-shaped white spine. Units = ref px / 100,
+// origin at the ref's centre; 14.3 units tall. s = pixels per unit. Bobs gently.
 function emblem(x,y,s){
-  y+=Math.sin(performance.now()/380)*3;
+  y+=Math.sin(performance.now()/380)*2;
   ctx.save();ctx.translate(x,y);ctx.scale(s,s);
-  ctx.lineJoin='round';ctx.lineWidth=0.55;ctx.strokeStyle='#0a0a0a';
+  ctx.lineJoin='round';ctx.lineWidth=0.42;ctx.strokeStyle='#000';
   const poly=(pts,fill)=>{ctx.beginPath();ctx.moveTo(pts[0],pts[1]);for(let i=2;i<pts.length;i+=2)ctx.lineTo(pts[i],pts[i+1]);ctx.closePath();ctx.fillStyle=fill;ctx.fill();ctx.stroke();};
-  poly([0,-1.5,-4.6,-3.1,-6.5,0.3,-4.6,3.4,0,6.5,4.6,3.4,6.5,0.3,4.6,-3.1],'#2b2b2f');   // shield
-  poly([-6.3,-5.2,-3.4,-4.2,-2.3,-1.5,-3.9,-2.5,-6.0,-3.0],'#4b4c52');                    // left crystal
-  poly([6.3,-5.2,3.4,-4.2,2.3,-1.5,3.9,-2.5,6.0,-3.0],'#4b4c52');                          // right crystal
-  poly([0,-6.5,-2.2,-3.9,-0.4,-0.3,0,-0.5,0.4,-0.3,2.2,-3.9],'#4b4c52');                   // centre crystal
-  ctx.fillStyle='#ffffff';
-  for(let i=0;i<7;i++){const yy=0.4+i*0.8,w=i===0||i===6?0.35:0.9+Math.sin(i/6*Math.PI)*0.5;
-    ctx.beginPath();ctx.ellipse(0,yy,w,0.3,0,0,6.3);ctx.fill();}
+  poly([-4.92,-0.3,-4.02,-2.2,4.02,-2.2,4.92,-0.3,0,7.3],'#262629');                 // shield
+  poly([-4.52,-5.4,-1.72,-3.85,0,0.6,-4.02,-2.2],'#4a4b51');                           // left spike
+  poly([4.52,-5.4,4.02,-2.2,0,0.6,1.72,-3.85],'#4a4b51');                              // right spike
+  poly([0,-6.95,-1.72,-3.85,0,0.6,1.72,-3.85],'#4a4b51');                              // centre spike
+  ctx.fillStyle='#fff';ctx.strokeStyle='#fff';ctx.lineCap='round';ctx.lineWidth=0.36;
+  for(const yy of [1.1,3.6,6.0]){ctx.beginPath();ctx.arc(0,yy,0.2,0,6.3);ctx.fill();}
+  for(const [yy,w] of [[1.5,0.6],[2.05,0.9],[2.6,0.9],[3.15,0.6],[4.05,0.6],[4.6,0.9],[5.15,0.9],[5.65,0.6]]){
+    ctx.beginPath();ctx.moveTo(-w,yy);ctx.quadraticCurveTo(0,yy+0.28,w,yy);ctx.stroke();}
+  ctx.lineCap='butt';
   ctx.restore();
 }
 
