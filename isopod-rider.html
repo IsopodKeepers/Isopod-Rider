@@ -6,13 +6,13 @@
 <title>ISOPOD RIDER</title>
 <style>
   *{margin:0;padding:0;box-sizing:border-box}
-  html,body{height:100%;background:#0a1410;color:#cfe0bb;
-    font-family:Verdana,"DejaVu Sans",sans-serif;overflow:hidden;
+  html,body{height:100%;background:#0a1410;color:#fbefd5;
+    font-family:"Arial Rounded MT Bold","Trebuchet MS",Verdana,"DejaVu Sans",sans-serif;overflow:hidden;
     display:flex;align-items:center;justify-content:center}
-  #wrap{position:relative;box-shadow:0 0 0 3px #24422f,0 0 50px rgba(0,0,0,.8)}
-  canvas{display:block;image-rendering:pixelated;background:#12261d}
-  #hint{position:absolute;left:0;right:0;bottom:-28px;text-align:center;font-size:11px;color:#5d7a5f}
-  kbd{background:#24422f;border:1px solid #3a6b4b;border-radius:3px;padding:1px 5px;color:#9fd08a;font-size:10px}
+  #wrap{position:relative;border-radius:14px;box-shadow:0 0 0 6px #8a5a2b,0 0 0 9px #5a3a1c,0 12px 40px rgba(0,0,0,.6)}
+  canvas{display:block;image-rendering:pixelated;background:#12261d;border-radius:8px}
+  #hint{position:absolute;left:0;right:0;bottom:-40px;text-align:center;font-size:12px;font-weight:bold;color:#fbefd5}
+  kbd{background:#fbefd5;border:2px solid #8a5a2b;border-radius:6px;padding:1px 6px;color:#5a3a1c;font-size:10px;font-weight:bold}
 </style>
 </head>
 <body>
@@ -812,44 +812,70 @@ function draw(){
   pod(Math.round(P.x-CX),Math.round(P.smY-CY));
 
   for(const f of fx){ctx.globalAlpha=Math.max(0,1-f.t/50);
-    ctx.font='bold 12px Verdana,sans-serif';ctx.textAlign='center';
-    ctx.fillStyle='#0a1410';ctx.fillText(f.text,f.x-CX+1,f.y-CY+1);
-    ctx.fillStyle=f.col;ctx.fillText(f.text,f.x-CX,f.y-CY);
+    ctx.textAlign='center';
+    txt(f.text,f.x-CX,f.y-CY,13,f.col,UI.ink,3);
     ctx.textAlign='left';ctx.globalAlpha=1;}
-  if(!started)startScreen();
-  hud();
+  if(started)hud();else startScreen();
+}
+
+/* ---------- UI kit: cream panels in wood frames, rounded cards, outlined text ---------- */
+const UI={wood:'#8a5a2b',woodDk:'#5a3a1c',cream:'#fbefd5',creamDk:'#f1dfb8',ink:'#4a2c14',
+  grass:'#5aa83a',grassDk:'#3f7f2a',orange:'#f4a533',orangeDk:'#c97a12',
+  card:{y:'#fff1c2',g:'#e6f5d8',b:'#dcefff',p:'#ffe0e6',n:'#f4ebd9'}};
+const FONT='"Arial Rounded MT Bold","Trebuchet MS",Verdana,sans-serif';
+function rr(x,y,w,h,r){ctx.beginPath();ctx.roundRect(x,y,w,h,r);}
+// wooden frame with a cream face
+function panel(x,y,w,h,r=14){
+  ctx.fillStyle='rgba(0,0,0,.25)';rr(x+3,y+6,w,h,r+4);ctx.fill();
+  ctx.fillStyle=UI.woodDk;rr(x-3,y-3,w+6,h+6,r+4);ctx.fill();
+  ctx.fillStyle=UI.wood;rr(x-1,y-1,w+2,h+2,r+2);ctx.fill();
+  ctx.fillStyle=UI.cream;rr(x+5,y+5,w-10,h-10,r-3);ctx.fill();
+}
+function card(x,y,w,h,fill,border,r=10){
+  ctx.fillStyle=border;rr(x,y,w,h,r);ctx.fill();
+  ctx.fillStyle=fill;rr(x+2.5,y+2.5,w-5,h-5,r-2);ctx.fill();
+}
+function txt(s,x,y,size,fill,stroke,lw){
+  ctx.font='bold '+size+'px '+FONT;
+  if(stroke){ctx.lineJoin='round';ctx.strokeStyle=stroke;ctx.lineWidth=lw||Math.max(2,size*.16);ctx.strokeText(s,x,y);}
+  ctx.fillStyle=fill;ctx.fillText(s,x,y);
+}
+function button(x,y,w,h,label){
+  ctx.fillStyle=UI.orangeDk;rr(x,y,w,h,12);ctx.fill();
+  ctx.fillStyle=UI.orange;rr(x+2.5,y+2.5,w-5,h-8,10);ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,.28)';rr(x+6,y+5,w-12,h*.35,6);ctx.fill();
+  ctx.textAlign='center';ctx.textBaseline='middle';
+  txt(label,x+w/2,y+h/2-1,15,UI.ink);
+  ctx.textBaseline='alphabetic';
 }
 
 function startScreen(){
-  ctx.fillStyle='rgba(8,18,14,.88)';ctx.fillRect(0,0,W,H);
-  ctx.textAlign='center';
-  ctx.font='bold 26px Verdana,sans-serif';
-  ctx.fillStyle='#0a1410';ctx.fillText('ISOPOD RIDER',W/2+2,H/2-152);
-  ctx.fillStyle='#ffcf9a';ctx.fillText('ISOPOD RIDER',W/2,H/2-154);
-  ctx.font='bold 11px Verdana,sans-serif';
-  ctx.fillStyle='#7fa87f';ctx.fillText('pick your pod',W/2,H/2-118);
+  ctx.fillStyle='rgba(20,40,30,.45)';ctx.fillRect(0,0,W,H);
+  const PX=W/2-350,PY=24,PW=700,PH=338;
+  panel(PX,PY,PW,PH);
+  // green header band with the title
+  card(PX+14,PY+14,PW-28,74,UI.grass,UI.grassDk,10);
+  ctx.textAlign='center';ctx.textBaseline='alphabetic';
+  txt('ISOPOD RIDER',W/2,PY+50,30,'#ff8a5c','#3a2a1a',6);
+  txt('GAS  ·  LOAD  ·  FLY',W/2,PY+74,11,UI.cream,'#2b4d1e',3);
 
   const n=PODS.length,gap=126,x0=W/2-(n-1)*gap/2,y=H/2-40;
+  const tint=[UI.card.p,UI.card.y,UI.card.p,UI.card.n,UI.card.b];
   for(let i=0;i<n;i++){
     const px=x0+i*gap,p=PODS[i],sel=i===podIdx;
-    ctx.fillStyle=sel?'rgba(214,242,122,.14)':'rgba(255,255,255,.04)';
-    ctx.fillRect(px-52,y-52,104,124);
-    ctx.strokeStyle=sel?'#d6f27a':'#31503c';ctx.lineWidth=sel?2:1;
-    ctx.strokeRect(px-52,y-52,104,124);
+    card(px-52,y-52,104,124,sel?'#fff':tint[i],sel?UI.orange:UI.wood,12);
+    if(sel){ctx.strokeStyle=UI.orange;ctx.lineWidth=3;rr(px-52,y-52,104,124,12);ctx.stroke();}
     // a curled pod in that colour
-    ctx.save();ctx.translate(px,y);ctx.rotate(-0.25);
+    ctx.save();ctx.translate(px,y-6);ctx.rotate(-0.25);
     shell(26,p);
     ctx.restore();
-    ctx.font='bold 9px Verdana,sans-serif';
-    ctx.fillStyle=sel?'#d6f27a':'#6f8a72';ctx.fillText(p.n,px,y+40);
-    ctx.fillStyle=sel?'#d6f27a':'#4a6650';ctx.fillText(String(i+1),px,y+54);
+    txt(p.n,px,y+44,9,UI.ink);
+    card(px-9,y+52,18,14,sel?UI.orange:UI.creamDk,UI.wood,5);
+    txt(String(i+1),px,y+63,9,UI.ink);
   }
-  ctx.font='bold 12px Verdana,sans-serif';
-  ctx.fillStyle='#cfe0bb';ctx.fillText('click a pod or press 1-'+n,W/2,H/2+96);
-  ctx.fillStyle='#d6f27a';ctx.fillText('SPACE to ride',W/2,H/2+118);
-  ctx.font='bold 10px Verdana,sans-serif';
-  ctx.fillStyle='#5d7a5f';
-  ctx.fillText('gas: UP   ·   load / brake: SPACE   ·   lean: LEFT RIGHT',W/2,H/2+150);
+  txt('click a pod twice, or press 1-'+n+' then SPACE',W/2,y+96,11,UI.ink);
+  button(W/2-130,y+108,260,40,'SPACE TO RIDE');
+  txt('gas: UP   ·   load / brake: SPACE   ·   lean: LEFT RIGHT   ·   M: sound',W/2,PY+PH-16,10,UI.wood);
   ctx.textAlign='left';
 }
 
@@ -925,25 +951,27 @@ function pod(x,y){
 }
 
 function hud(){
-  ctx.font='bold 11px Verdana,sans-serif';ctx.textBaseline='top';
-  const t=(v,x,y,c)=>{ctx.fillStyle='#0a1410';ctx.fillText(v,x+1,y+1);ctx.fillStyle=c;ctx.fillText(v,x,y);};
-  ctx.font='bold 26px Verdana,sans-serif';
-  t(P.spd.toFixed(1),12,10,P.spd>14?'#d6f27a':'#e8f0d8');
-  ctx.font='bold 10px Verdana,sans-serif';
-  t('SPEED',13,40,'#7fa87f');
-  ctx.fillStyle='#0a1410';ctx.fillRect(12,54,180,8);
-  ctx.fillStyle=P.spd>14?'#d6f27a':'#6dbf5c';
-  ctx.fillRect(13,55,Math.round(178*Math.min(1,P.spd/22)),6);
+  ctx.textBaseline='top';ctx.textAlign='left';
+  const t=(v,x,y,c,sz=11)=>txt(v,x,y,sz,c);
+  // speed / time card, top-left
+  panel(10,10,212,78,12);
+  t(P.spd.toFixed(1),22,18,P.spd>14?UI.orangeDk:UI.ink,26);
+  t('SPEED',92,32,UI.wood,10);
+  ctx.fillStyle=UI.creamDk;rr(22,50,186,10,5);ctx.fill();
+  ctx.fillStyle=P.spd>14?UI.orange:UI.grass;rr(23,51,Math.max(4,Math.round(184*Math.min(1,P.spd/22))),8,4);ctx.fill();
   const s=P.time/60;
-  t(Math.floor(s/60)+':'+String(Math.floor(s%60)).padStart(2,'0'),12,70,'#cfe0bb');
-  t('best '+P.best.toFixed(1),70,70,'#7fa87f');
-  t('attempt '+attempts,140,70,attempts>1?'#ff6b6b':'#5f7a66');
-  ctx.fillStyle='rgba(10,20,16,.6)';ctx.fillRect(W-190,14,178,6);
-  ctx.fillStyle='#9ff0c0';ctx.fillRect(W-190,14,Math.round(178*Math.min(1,P.x/FINISH)),6);
+  t(Math.floor(s/60)+':'+String(Math.floor(s%60)).padStart(2,'0'),22,66,UI.ink,10);
+  t('best '+P.best.toFixed(1),74,66,UI.wood,10);
+  t('attempt '+attempts,140,66,attempts>1?'#d94f3d':UI.wood,10);
 
   // ---- the road ahead: silhouette of the next stretch, with each hill flagged ----
   const PW=300,PH=54,PX=W-PW-12,PY=28,AHEAD=6200,BEHIND=700;
-  ctx.fillStyle='rgba(10,20,16,.55)';ctx.fillRect(PX,PY,PW,PH);
+  panel(PX-8,PY-18,PW+16,PH+26,12);
+  t('ROAD AHEAD',PX+2,PY-8,UI.wood,8);
+  ctx.fillStyle=UI.creamDk;rr(PX+64,PY-8,PW-64,8,4);ctx.fill();
+  ctx.fillStyle=UI.grass;rr(PX+64,PY-8,Math.max(4,Math.round((PW-64)*Math.min(1,P.x/FINISH))),8,4);ctx.fill();
+  ctx.fillStyle='#dcefff';rr(PX,PY+8,PW,PH-8,6);ctx.fill();
+  ctx.save();rr(PX,PY+8,PW,PH-8,6);ctx.clip();
   let lo=1e9,hi=-1e9;
   for(let i=0;i<=60;i++){const wx=P.x-BEHIND+(AHEAD+BEHIND)*i/60,g=gAt(wx);
     if(g<lo)lo=g; if(g>hi)hi=g;}
@@ -953,8 +981,8 @@ function hud(){
   for(let i=0;i<=PW;i++){const wx=P.x-BEHIND+(AHEAD+BEHIND)*i/PW;
     const yy=py(wx); if(i===0)ctx.moveTo(PX,yy);else ctx.lineTo(PX+i,yy);}
   ctx.lineTo(PX+PW,PY+PH);ctx.lineTo(PX,PY+PH);ctx.closePath();
-  ctx.fillStyle='#4a3018';ctx.fill();
-  ctx.strokeStyle='#8f5d31';ctx.lineWidth=1.5;ctx.beginPath();
+  ctx.fillStyle='#8a5a2b';ctx.fill();
+  ctx.strokeStyle=UI.grass;ctx.lineWidth=3;ctx.beginPath();
   for(let i=0;i<=PW;i++){const wx=P.x-BEHIND+(AHEAD+BEHIND)*i/PW;
     const yy=py(wx); if(i===0)ctx.moveTo(PX,yy);else ctx.lineTo(PX+i,yy);}
   ctx.stroke();
@@ -962,25 +990,27 @@ function hud(){
     if(j.x<P.x-BEHIND||j.x>P.x+AHEAD)continue;
     const px=PX+PW*(j.x-(P.x-BEHIND))/(AHEAD+BEHIND);
     ctx.fillStyle={s:'#6dbf5c',m:'#e8c14a',l:'#e88a3c',p:'#e8566c',d:'#9f7cf0',j:'#5fd0e8',k:'#5fd0e8',u:'#f0c24a',w:'#49c8f0',g:'#d0d6de'}[j.kind];
+    ctx.strokeStyle=UI.ink;ctx.lineWidth=1.5;ctx.lineJoin='round';
     ctx.beginPath();ctx.moveTo(px,py(j.x)-6);ctx.lineTo(px-4,py(j.x)-13);
-    ctx.lineTo(px+4,py(j.x)-13);ctx.closePath();ctx.fill();
+    ctx.lineTo(px+4,py(j.x)-13);ctx.closePath();ctx.fill();ctx.stroke();
   }
   const mx=PX+PW*BEHIND/(AHEAD+BEHIND);
-  ctx.fillStyle='#ff8a4c';ctx.beginPath();ctx.arc(mx,py(P.x)-4,3.5,0,6.3);ctx.fill();
-  ctx.fillStyle='#5f7a66';ctx.font='bold 8px Verdana,sans-serif';
-  ctx.fillText('ROAD AHEAD',PX+2,PY-10);
+  ctx.fillStyle='#ff8a4c';ctx.strokeStyle=UI.ink;ctx.lineWidth=1.5;
+  ctx.beginPath();ctx.arc(mx,py(P.x)-4,4,0,6.3);ctx.fill();ctx.stroke();
+  ctx.restore();
 
   if(P.won){
-    ctx.fillStyle='rgba(10,20,16,.86)';ctx.fillRect(0,0,W,H);
-    ctx.textAlign='center';ctx.font='bold 24px Verdana,sans-serif';
-    t('FINISHED',W/2,H/2-70,'#ffcf9a');
-    ctx.font='bold 12px Verdana,sans-serif';
+    ctx.fillStyle='rgba(20,40,30,.45)';ctx.fillRect(0,0,W,H);
+    panel(W/2-190,H/2-110,380,220);
+    card(W/2-176,H/2-96,352,54,UI.grass,UI.grassDk,10);
+    ctx.textAlign='center';
+    txt('FINISHED!',W/2,H/2-84,26,'#ff8a5c','#3a2a1a',5);
     const ws=P.won/60;
-    t('time  '+Math.floor(ws/60)+':'+String(Math.floor(ws%60)).padStart(2,'0'),W/2,H/2-24,'#cfe0bb');
-    t('top speed  '+P.best.toFixed(1),W/2,H/2-4,'#d6f27a');
-    t('attempts  '+attempts,W/2,H/2+16,'#ff6b6b');
-    t('press R to ride it again',W/2,H/2+50,'#7fa87f');
-    ctx.textAlign='left';}
+    card(W/2-176,H/2-32,170,54,UI.card.y,UI.wood);  t('TIME',W/2-91,H/2-24,UI.wood,9);  t(Math.floor(ws/60)+':'+String(Math.floor(ws%60)).padStart(2,'0'),W/2-91,H/2-10,UI.ink,18);
+    card(W/2+6,H/2-32,170,54,UI.card.g,UI.wood);    t('TOP SPEED',W/2+91,H/2-24,UI.wood,9); t(P.best.toFixed(1),W/2+91,H/2-10,UI.ink,18);
+    t('attempts  '+attempts,W/2,H/2+30,attempts>1?'#d94f3d':UI.wood,11);
+    button(W/2-120,H/2+56,240,38,'PRESS R TO RIDE AGAIN');
+    ctx.textAlign='left';ctx.textBaseline='top';}
 }
 
 let acc=0,last=performance.now();
