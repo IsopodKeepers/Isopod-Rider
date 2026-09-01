@@ -474,7 +474,7 @@ function step(){
     const rd=6,ra=Math.atan2(railYat(P.rail,P.x+rd)-railYat(P.rail,P.x-rd),2*rd);
     // no rolling on steel -- he stands and slides, body lying along the bar
     P.spin=(P.spin||0)*0.80;          // bleed off the roll; steel does not spin you
-    P.rot=angLerp(P.rot,ra,0.30);
+    const pr=P.rot;P.rot=angLerp(P.rot,ra,0.30);P.vrot=(P.vrot||0)+norm(P.rot-pr);
     P.ang=ra;P.lean=ra;
     P.x+=P.spd*Math.cos(ra);P.y=railYat(P.rail,P.x)-R;P.prevVy=0;
     P.grindT=(P.grindT||0)+1;
@@ -563,7 +563,7 @@ function step(){
     P.x+=P.vx;P.y+=P.vy;
     const pr=P.rot;
     P.rot=angLerp(P.rot,P.lean,0.22);         // spin settles into the lean
-    P.spin=norm(P.rot-pr);P.vrot=(P.vrot||0)+Math.sign(P.spin)*Math.min(VSPIN_MAX,Math.abs(P.spin)*VSPIN);
+    P.spin=norm(P.rot-pr);P.vrot=(P.vrot||0)+P.spin;   // in the air the plates lock to the body
     const g=gAt(P.x);
     // Test whether we CROSSED the surface, not whether we happen to be falling.
     // Requiring vy>0 meant flying upward into a climbing face -- the takeoff ramp
@@ -656,6 +656,50 @@ function buildDecor(){decor=[];let s=7331;
   for(let x=-200;x<LEN+400;x+=64)decor.push({x:x+rnd()*36,s:.28,h:70+rnd()*80,w:16+rnd()*20,k:rnd()});
   for(let x=-200;x<LEN+400;x+=104)decor.push({x:x+rnd()*50,s:.55,h:110+rnd()*90,w:24+rnd()*28,k:rnd()});}
 
+// Terrain: dark dirt with a lighter topsoil band, an inked outline along the surface,
+// a green grass strip with tufts, and hashed pebbles / roots so nothing is random per frame.
+const hsh=n=>{n=(n*2654435761)>>>0;n^=n>>>15;n=(n*2246822519)>>>0;return (n^(n>>>13))>>>0;};
+function ground(CX,CY){
+  const ST=4;   // sample step
+  const path=(off)=>{ctx.beginPath();
+    for(let sx=-ST;sx<=W+ST;sx+=ST){const y=gAt(CX+sx)-CY+off;sx===-ST?ctx.moveTo(sx,y):ctx.lineTo(sx,y);}};
+  const closeDown=()=>{ctx.lineTo(W+ST,H+20);ctx.lineTo(-ST,H+20);ctx.closePath();};
+  ctx.lineJoin='round';ctx.lineCap='round';
+  // deep dirt
+  path(0);closeDown();ctx.fillStyle='#4a2f1a';ctx.fill();
+  // topsoil band
+  path(0);for(let sx=W+ST;sx>=-ST;sx-=ST)ctx.lineTo(sx,gAt(CX+sx)-CY+38);ctx.closePath();
+  ctx.fillStyle='#6b4527';ctx.fill();
+  // wavy seam between the layers
+  ctx.strokeStyle='#3d2614';ctx.lineWidth=3;ctx.beginPath();
+  for(let sx=-ST;sx<=W+ST;sx+=ST){const wx=CX+sx,y=gAt(wx)-CY+52+Math.sin(wx*0.021)*4+Math.sin(wx*0.0073)*6;
+    sx===-ST?ctx.moveTo(sx,y):ctx.lineTo(sx,y);}
+  ctx.stroke();
+  // pebbles and roots, hashed on world x so they stay put as the camera moves
+  ctx.fillStyle='#3d2614';ctx.strokeStyle='#3d2614';ctx.lineWidth=1.6;
+  for(let wx=Math.floor(CX/12)*12;wx<CX+W+12;wx+=12){
+    const h=hsh(wx),sx=wx-CX;
+    if((h&7)<2){const d=44+(h>>3)%70,r=1.5+((h>>10)&3)*0.6;
+      ctx.beginPath();ctx.ellipse(sx+((h>>5)&7),gAt(wx)-CY+d,r*1.3,r,0,0,6.3);ctx.fill();}
+    if((h>>13)%9===0){const gy=gAt(wx)-CY+38,L=16+(h>>16)%22,sw=((h>>20)&1?1:-1)*(3+(h>>21)%5);
+      ctx.beginPath();ctx.moveTo(sx,gy);ctx.quadraticCurveTo(sx+sw,gy+L*0.5,sx-sw*0.4,gy+L);ctx.stroke();
+      if(h&0x400000){ctx.beginPath();ctx.moveTo(sx+sw*0.5,gy+L*0.45);ctx.lineTo(sx+sw*1.6,gy+L*0.8);ctx.stroke();}}
+  }
+  // grass strip and inked surface line
+  path(-1);for(let sx=W+ST;sx>=-ST;sx-=ST)ctx.lineTo(sx,gAt(CX+sx)-CY+6);ctx.closePath();
+  ctx.fillStyle='#3f7a2f';ctx.fill();
+  path(1.5);ctx.strokeStyle='#2a1a0c';ctx.lineWidth=3.5;ctx.stroke();
+  // tufts: a few thin blades leaning with the slope, in two greens
+  for(let wx=Math.floor(CX/6)*6;wx<CX+W+6;wx+=6){
+    const h=hsh(wx*3+1);if((h&15)>5)continue;
+    const sx=wx-CX,gy=gAt(wx)-CY,n=2+(h>>4)%2,tall=5+(h>>6)%6;
+    ctx.strokeStyle=(h>>9)&1?'#6fae43':'#4f8f36';ctx.lineWidth=1.5;
+    for(let i=0;i<n;i++){const ox=(i-(n-1)/2)*2.2,lean=((h>>(12+i*3))%5-2)*1.1;
+      ctx.beginPath();ctx.moveTo(sx+ox,gy+1);ctx.quadraticCurveTo(sx+ox+lean*0.5,gy-tall*0.55,sx+ox+lean,gy-tall);ctx.stroke();}
+  }
+  ctx.lineCap='butt';
+}
+
 function draw(){
   const CX=Math.round(cam.x),CY=Math.round(cam.y);
   const sky=ctx.createLinearGradient(0,0,0,H);
@@ -669,15 +713,7 @@ function draw(){
     ctx.fillRect(px,py-d.h,d.w,d.h+520);
     ctx.beginPath();ctx.arc(px+d.w/2,py-d.h,22+d.k*18,0,6.3);ctx.fill();}
 
-  for(let sx=0;sx<W;sx++){
-    const wx=CX+sx,sy=Math.round(gAt(wx)-CY);
-    if(sy>H)continue;
-    ctx.fillStyle='#8f5d31';ctx.fillRect(sx,sy,1,3);
-    ctx.fillStyle='#6d4423';ctx.fillRect(sx,sy+3,1,8);
-    ctx.fillStyle='#553417';ctx.fillRect(sx,sy+11,1,22);
-    ctx.fillStyle='#3a230f';ctx.fillRect(sx,sy+33,1,H);
-    if((wx*7919%41)===0){ctx.fillStyle='#a06f3d';ctx.fillRect(sx,sy+1,1,2);}
-    if((wx%14)===0){ctx.fillStyle='#427f42';ctx.fillRect(sx,sy-2,1,2);}}
+  ground(CX,CY);
 
   // WATER: filled per column between the surface and the ground beneath it, so it
   // sits in the basin instead of covering the terrain as a flat slab.
@@ -840,23 +876,34 @@ function pod(x,y){
   const o=1-P.curl;                       // 0 = balled, 1 = splayed out
   const gr=P.rail?Math.min(1,(P.grindT||0)/8):0;   // how settled into the grind stance
   const sq=P.splat>0?Math.min(1,(48/T-P.splat)/(6/T)):0;      // pancaked on impact
-  const VR=R;
+  const fly=(!P.ground&&!P.rail)?o:0;   // airborne and open: spread out and glide
   ctx.save();ctx.translate(x,y);ctx.rotate(P.rot);
-  const len=VR*(1+o*.10+gr*0.34)*(1+sq*0.85),hgt=VR*(1-o*.06-gr*0.20)*(1-sq*0.62);
+  const len=R*(1+o*.10+gr*0.34+fly*0.30)*(1+sq*0.85),hgt=R*(1-o*.06-gr*0.20-fly*0.16)*(1-sq*0.62);
   if(o>.05){ctx.globalAlpha=Math.min(1,o*1.6);
     ctx.strokeStyle=C().lg;ctx.lineWidth=1.6+gr*0.7;
-    for(let i=0;i<6;i++){const lx=-len*.62+i*(len*.25);
-      // grinding: legs braced straight down onto the bar. otherwise they paddle.
-      const sw=gr>0 ? lx*-0.30 : Math.sin(P.time*.22+i)*1.4*o;
-      const reach=hgt*.72+(3.2*o)+gr*5.5;
-      ctx.beginPath();ctx.moveTo(lx,hgt*.7);ctx.lineTo(lx+sw,reach);ctx.stroke();}
+    if(fly>0){
+      // flying: legs fan out above and below like wings, trailing back, with a slow flap
+      const flap=Math.sin(P.time*.18)*2.2*fly;
+      for(let i=0;i<3;i++){const lx=-len*.45+i*(len*.36);
+        for(const s of [-1,1]){
+          const sp=(6+i*1.5)*fly, back=(4+i*2)*fly;
+          ctx.beginPath();ctx.moveTo(lx,s*hgt*.55);
+          ctx.lineTo(lx-back*0.5,s*(hgt*.55+sp*0.6+flap*0.5));
+          ctx.lineTo(lx-back,s*(hgt*.55+sp+flap));ctx.stroke();}}
+    }else{
+      for(let i=0;i<6;i++){const lx=-len*.62+i*(len*.25);
+        // grinding: legs braced straight down onto the bar. otherwise they paddle.
+        const sw=gr>0 ? lx*-0.30 : Math.sin(P.time*.22+i)*1.4*o;
+        const reach=hgt*.72+(3.2*o)+gr*5.5;
+        ctx.beginPath();ctx.moveTo(lx,hgt*.7);ctx.lineTo(lx+sw,reach);ctx.stroke();}
+    }
     ctx.globalAlpha=1;}
   // the plate pattern turns at a fraction of the true roll (wagon-wheel) so it stays readable
   ctx.save();ctx.scale(len/R,hgt/R);ctx.rotate((P.vrot||0)-P.rot);shell(R,C());ctx.restore();
   // head plate shows as he unfurls, so the lean angle reads when it matters
   if(o>.05){ctx.globalAlpha=Math.min(1,o*1.6);
     ctx.fillStyle=C().hd;
-    ctx.beginPath();ctx.ellipse(len*.66,0,len*.26,hgt*.72,0,0,6.3);ctx.fill();
+    ctx.beginPath();ctx.ellipse(len*(.66+fly*.08),0,len*.26,hgt*.72,0,0,6.3);ctx.fill();
     ctx.globalAlpha=1;}
   if(P.press>0.08){                      // charge ring: brighter the more you have loaded
     ctx.globalAlpha=0.25+P.press*0.6;
