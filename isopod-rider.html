@@ -642,7 +642,7 @@ function land(g){
   const diff=Math.abs(norm(P.lean-a));
   if(diff<CLEAN){
     P.spd=proj*1.10;                    // land it flush, keep the lot
-    note(P.air>44?'BIG AIR':'SMOOTH','#d6f27a');puff(10,P.x,P.y+R,3);SND.land(true);
+    note(P.air>=120?'BIG AIR':'SMOOTH','#d6f27a');puff(10,P.x,P.y+R,3);SND.land(true);
   }else if(diff<ROUGH){
     P.spd=proj*0.88;
     note('ROUGH','#ffd23f');puff(8,P.x,P.y+R,2.4);SND.land(false);
