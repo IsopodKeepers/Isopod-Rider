@@ -41,19 +41,13 @@ const LEAN=0.055*T, R=11;
 // sh = shell body, bd = rim + plate seams, hi = highlight, hd = head, lg = legs, dk = eye/antennae.
 // sm = per-seam colours (optional) for shells whose lines are mixed colours.
 const PODS=[
-  {n:'EMBER BEE',      sh:'#151515', dk:'#a8471d', bd:'#ff8a4c', hi:'#ffcf9a', hd:'#ffe0b8', lg:'#5e2410'},
-  {n:'ZEBRA',          sh:'#151515', dk:'#4a4a54', bd:'#f0f0ea', hi:'#ffffff', hd:'#ffffff', lg:'#232329'},
-  {n:'CHERRY BLOSSOM', sh:'#ff7eb6', dk:'#b0416f', bd:'#ffb3d1', hi:'#ffe0ee', hd:'#ffd6e6', lg:'#7a2c4c'},
   {n:"DAN'S COSMIC DUST", sh:'#151515', dk:'#3a3a3a', bd:'#ff7ec8', hi:'#ffffff', hd:'#e6e6e6', lg:'#232329',
-     mix:['#5cf07a','#ff7ec8','#ffe95c','#151515']},
+     sm:['#ff7ec8','#5cf07a','#ff7ec8','#ffe95c','#ff7ec8','#3a3a3a','#ff7ec8','#ff7ec8']},
+  {n:'EMBER BEE',      sh:'#151515', dk:'#a8471d', bd:'#ff8a4c', hi:'#ffcf9a', hd:'#ffe0b8', lg:'#5e2410'},
+  {n:'CHERRY BLOSSOM', sh:'#ff7eb6', dk:'#b0416f', bd:'#ffb3d1', hi:'#ffe0ee', hd:'#ffd6e6', lg:'#7a2c4c'},
+  {n:'ZEBRA',          sh:'#151515', dk:'#4a4a54', bd:'#f0f0ea', hi:'#ffffff', hd:'#ffffff', lg:'#232329'},
   {n:'GLACIER',        sh:'#ffffff', dk:'#8aa4b8', bd:'#d3dee7', hi:'#ffffff', hd:'#f4f8fb', lg:'#6b8296'},
 ];
-// Cosmic Dust: shuffle its palette into the shell + eight seams each time the page loads.
-for(const p of PODS)if(p.mix){
-  const pick=()=>p.mix[Math.floor(Math.random()*p.mix.length)];
-  p.sh=pick();p.sm=[];for(let i=0;i<8;i++){let c=pick();while(c===p.sh)c=pick();p.sm.push(c);}
-  p.bd=p.sm[0];
-}
 let podIdx=0, started=false;
 const waters=[];   // {a,b,y} spans where falling below the surface drowns you
 const rails=[];    // {a,b,y,crown} bars you can land on and grind
