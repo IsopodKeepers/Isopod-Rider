@@ -877,7 +877,10 @@ function pod(x,y){
   const gr=P.rail?Math.min(1,(P.grindT||0)/8):0;   // how settled into the grind stance
   const sq=P.splat>0?Math.min(1,(48/T-P.splat)/(6/T)):0;      // pancaked on impact
   const fly=(!P.ground&&!P.rail)?o:0;   // airborne and open: spread out and glide
-  ctx.save();ctx.translate(x,y);ctx.rotate(P.rot);
+  // physics keeps the centre R straight above the dirt, which sinks the ball into a
+  // slope by R/cos(a)-R; lift the drawing so the ball sits tangent to the face
+  const lift=(P.ground&&!P.rail&&!P.splat)?Math.min(R*0.6,R/Math.max(0.5,Math.cos(P.ang))-R):0;
+  ctx.save();ctx.translate(x,y-lift);ctx.rotate(P.rot);
   const len=R*(1+o*.10+gr*0.34+fly*0.30)*(1+sq*0.85),hgt=R*(1-o*.06-gr*0.20-fly*0.16)*(1-sq*0.62);
   if(o>.05){ctx.globalAlpha=Math.min(1,o*1.6);
     ctx.strokeStyle=C().lg;ctx.lineWidth=1.6+gr*0.7;
