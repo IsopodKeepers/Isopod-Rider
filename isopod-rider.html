@@ -296,7 +296,7 @@ const gSm=x=>{
 };
 // a centred sample straddles a jump lip and reports the cliff instead of the ramp,
 // which poisons the takeoff attitude. Fall back to one-sided near a discontinuity.
-function angAt(x){const d=7,a=gAt(x-d),b=gAt(x),c=gAt(x+d);
+function angAt(x){const d=7,a=gSm(x-d),b=gSm(x),c=gSm(x+d);
   if(Math.abs(c-b)>14)return Math.atan2(b-a,d);
   if(Math.abs(b-a)>14)return Math.atan2(c-b,d);
   return Math.atan2(c-a,2*d);}
@@ -524,9 +524,9 @@ function step(){
 
     P.spin=P.spd/R;P.rot+=P.spin;P.vrot=(P.vrot||0)+Math.sign(P.spin)*Math.min(VSPIN_MAX,Math.abs(P.spin)*VSPIN);
     P.lean=a;
-    const ox=P.x, oy=gAt(P.x);
+    const ox=P.x, oy=gSm(P.x);
     P.x+=P.spd*Math.cos(a);
-    const ny=gAt(P.x), vy=ny-oy;
+    const ny=gSm(P.x), vy=ny-oy;
     if(vy-P.prevVy>GRAV*2.1/T&&P.spd>2.5*T){                 // ground dropped away: airborne
       // Leave from the point we were actually standing on. Advancing x first and
       // keeping the old y buried the isopod inside steep climbing faces -- it then
@@ -567,7 +567,7 @@ function step(){
     const pr=P.rot;
     P.rot=angLerp(P.rot,P.lean,0.22);         // spin settles into the lean
     P.spin=norm(P.rot-pr);P.vrot=(P.vrot||0)+P.spin;   // in the air the plates lock to the body
-    const g=gAt(P.x);
+    const g=gSm(P.x);
     // Test whether we CROSSED the surface, not whether we happen to be falling.
     // Requiring vy>0 meant flying upward into a climbing face -- the takeoff ramp
     // of a dirt jump -- registered no collision at all, and you went through it.
@@ -695,7 +695,7 @@ function ground(CX,CY){
   // tufts: a few thin blades leaning with the slope, in two greens
   for(let wx=Math.floor(CX/6)*6;wx<CX+W+6;wx+=6){
     const h=hsh(wx*3+1);if((h&15)>5)continue;
-    const sx=wx-CX,gy=gAt(wx)-CY,n=2+(h>>4)%2,tall=5+(h>>6)%6;
+    const sx=wx-CX,gy=gAt(wx)-CY,n=2+(h>>4)%2,tall=3+(h>>6)%4;
     ctx.strokeStyle=(h>>9)&1?'#6fae43':'#4f8f36';ctx.lineWidth=1.5;
     for(let i=0;i<n;i++){const ox=(i-(n-1)/2)*2.2,lean=((h>>(12+i*3))%5-2)*1.1;
       ctx.beginPath();ctx.moveTo(sx+ox,gy+1);ctx.quadraticCurveTo(sx+ox+lean*0.5,gy-tall*0.55,sx+ox+lean,gy-tall);ctx.stroke();}
@@ -705,7 +705,7 @@ function ground(CX,CY){
 
 function draw(){
   ctx.setTransform(SC,0,0,SC,0,0);
-  const CX=Math.round(cam.x),CY=Math.round(cam.y);
+  const CX=cam.x,CY=cam.y;
   const sky=ctx.createLinearGradient(0,0,0,H);
   sky.addColorStop(0,'#20573c');sky.addColorStop(1,'#12261d');
   ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
@@ -809,11 +809,14 @@ function draw(){
     ctx.fillStyle='#b58f60';ctx.fillRect(Math.round(d.x-CX),Math.round(d.y-CY),2,2);}
   ctx.globalAlpha=1;
 
-  // smooth the DRAWN height only -- physics is untouched. Harmless 1-2px micro-hops
-  // on descents were reading as the pod juddering along.
-  if(P.smY===undefined||Math.abs(P.smY-P.y)>26)P.smY=P.y;
-  P.smY+=(P.y-P.smY)*(P.ground?0.45:1);
-  pod(Math.round(P.x-CX),Math.round(P.smY-CY));
+  // Smooth the DRAWN height only -- physics is untouched. Smoothing is applied to the offset above the dirt, not to y itself, so the pod
+  // tracks the slope exactly at any speed instead of lagging behind it.
+  const base=(P.ground&&!P.rail)?gSm(P.x)-R:P.y,off=P.y-base;
+  if(P.smOff===undefined||!P.ground||P.rail)P.smOff=off;
+  P.smOff+=(off-P.smOff)*0.45;
+  P.smY=base+P.smOff;
+  P.smA=P.smA===undefined?P.ang:P.smA+(P.ang-P.smA)*0.3;
+  pod(P.x-CX,P.smY-CY);
 
   for(const f of fx){ctx.globalAlpha=Math.max(0,1-f.t/50);
     ctx.textAlign='center';
@@ -873,9 +876,7 @@ function startScreen(){
     ctx.save();ctx.translate(px,y-6);ctx.rotate(-0.25);
     shell(26,p);
     ctx.restore();
-    txt(p.n,px,y+44,9,UI.ink);
-    card(px-9,y+52,18,14,sel?UI.orange:UI.creamDk,UI.wood,5);
-    txt(String(i+1),px,y+63,9,UI.ink);
+    txt(p.n,px,y+52,9,UI.ink);
   }
   txt('click a pod twice, or press 1-'+n+' then SPACE',W/2,y+96,11,UI.ink);
   button(W/2-130,y+108,260,40,'SPACE TO RIDE');
@@ -909,7 +910,7 @@ function pod(x,y){
   const fly=(!P.ground&&!P.rail)?o:0;   // airborne and open: spread out and glide
   // physics keeps the centre R straight above the dirt, which sinks the ball into a
   // slope by R/cos(a)-R; lift the drawing so the ball sits tangent to the face
-  const lift=(P.ground&&!P.rail&&!P.splat)?Math.min(R*0.6,R/Math.max(0.5,Math.cos(P.ang))-R):0;
+  const lift=(P.ground&&!P.rail&&!P.splat)?Math.min(R*0.6,R/Math.max(0.5,Math.cos(P.smA))-R):0;
   ctx.save();ctx.translate(x,y-lift);ctx.rotate(P.rot);
   const len=R*(1+o*.10+gr*0.34+fly*0.30)*(1+sq*0.85),hgt=R*(1-o*.06-gr*0.20-fly*0.16)*(1-sq*0.62);
   if(o>.05){ctx.globalAlpha=Math.min(1,o*1.6);
