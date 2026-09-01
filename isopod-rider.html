@@ -10,7 +10,7 @@
     font-family:"Arial Rounded MT Bold","Trebuchet MS",Verdana,"DejaVu Sans",sans-serif;overflow:hidden;
     display:flex;align-items:center;justify-content:center}
   #wrap{position:relative;border-radius:14px;box-shadow:0 0 0 6px #8a5a2b,0 0 0 9px #5a3a1c,0 12px 40px rgba(0,0,0,.6)}
-  canvas{display:block;image-rendering:pixelated;background:#12261d;border-radius:8px}
+  canvas{display:block;background:#12261d;border-radius:8px}
   #hint{position:absolute;left:0;right:0;bottom:-40px;text-align:center;font-size:12px;font-weight:bold;color:#fbefd5}
   kbd{background:#fbefd5;border:2px solid #8a5a2b;border-radius:6px;padding:1px 6px;color:#5a3a1c;font-size:10px;font-weight:bold}
 </style>
@@ -26,9 +26,12 @@
 (() => {
 "use strict";
 const W=760,H=420,cv=document.getElementById('c'),ctx=cv.getContext('2d');
-ctx.imageSmoothingEnabled=false;
+// the game thinks in a fixed 760x420 space; the backing store is sized to the real
+// on-screen pixels (incl. devicePixelRatio) so lines and text stay crisp when scaled
+let SC=1;
 function fit(){const s=Math.max(1,Math.min(innerWidth/W,(innerHeight-70)/H));
-  cv.style.width=(W*s|0)+'px';cv.style.height=(H*s|0)+'px';}
+  cv.style.width=(W*s|0)+'px';cv.style.height=(H*s|0)+'px';
+  SC=s*(devicePixelRatio||1);cv.width=Math.round(W*SC);cv.height=Math.round(H*SC);}
 addEventListener('resize',fit);fit();
 
 /* ---------- tuning ---------- */
@@ -701,6 +704,7 @@ function ground(CX,CY){
 }
 
 function draw(){
+  ctx.setTransform(SC,0,0,SC,0,0);
   const CX=Math.round(cam.x),CY=Math.round(cam.y);
   const sky=ctx.createLinearGradient(0,0,0,H);
   sky.addColorStop(0,'#20573c');sky.addColorStop(1,'#12261d');
@@ -954,29 +958,29 @@ function hud(){
   ctx.textBaseline='top';ctx.textAlign='left';
   const t=(v,x,y,c,sz=11)=>txt(v,x,y,sz,c);
   // speed / time card, top-left
-  panel(10,10,212,78,12);
-  t(P.spd.toFixed(1),22,18,P.spd>14?UI.orangeDk:UI.ink,26);
-  t('SPEED',92,32,UI.wood,10);
-  ctx.fillStyle=UI.creamDk;rr(22,50,186,10,5);ctx.fill();
-  ctx.fillStyle=P.spd>14?UI.orange:UI.grass;rr(23,51,Math.max(4,Math.round(184*Math.min(1,P.spd/22))),8,4);ctx.fill();
+  panel(10,10,168,60,10);
+  t(P.spd.toFixed(1),20,15,P.spd>14?UI.orangeDk:UI.ink,20);
+  t('SPEED',72,25,UI.wood,8);
+  ctx.fillStyle=UI.creamDk;rr(20,40,148,7,3.5);ctx.fill();
+  ctx.fillStyle=P.spd>14?UI.orange:UI.grass;rr(21,41,Math.max(3,Math.round(146*Math.min(1,P.spd/22))),5,2.5);ctx.fill();
   const s=P.time/60;
-  t(Math.floor(s/60)+':'+String(Math.floor(s%60)).padStart(2,'0'),22,66,UI.ink,10);
-  t('best '+P.best.toFixed(1),74,66,UI.wood,10);
-  t('attempt '+attempts,140,66,attempts>1?'#d94f3d':UI.wood,10);
+  t(Math.floor(s/60)+':'+String(Math.floor(s%60)).padStart(2,'0'),20,52,UI.ink,8);
+  t('best '+P.best.toFixed(1),62,52,UI.wood,8);
+  t('attempt '+attempts,116,52,attempts>1?'#d94f3d':UI.wood,8);
 
   // ---- the road ahead: silhouette of the next stretch, with each hill flagged ----
-  const PW=300,PH=54,PX=W-PW-12,PY=28,AHEAD=6200,BEHIND=700;
-  panel(PX-8,PY-18,PW+16,PH+26,12);
-  t('ROAD AHEAD',PX+2,PY-8,UI.wood,8);
-  ctx.fillStyle=UI.creamDk;rr(PX+64,PY-8,PW-64,8,4);ctx.fill();
-  ctx.fillStyle=UI.grass;rr(PX+64,PY-8,Math.max(4,Math.round((PW-64)*Math.min(1,P.x/FINISH))),8,4);ctx.fill();
-  ctx.fillStyle='#dcefff';rr(PX,PY+8,PW,PH-8,6);ctx.fill();
-  ctx.save();rr(PX,PY+8,PW,PH-8,6);ctx.clip();
+  const PW=230,PH=44,PX=W-PW-18,PY=24,AHEAD=6200,BEHIND=700;
+  panel(PX-8,PY-14,PW+16,PH+22,10);
+  t('ROAD AHEAD',PX+1,PY-6,UI.wood,7);
+  ctx.fillStyle=UI.creamDk;rr(PX+54,PY-6,PW-54,6,3);ctx.fill();
+  ctx.fillStyle=UI.grass;rr(PX+54,PY-6,Math.max(3,Math.round((PW-54)*Math.min(1,P.x/FINISH))),6,3);ctx.fill();
+  ctx.fillStyle='#dcefff';rr(PX,PY+6,PW,PH-6,5);ctx.fill();
+  ctx.save();rr(PX,PY+6,PW,PH-6,5);ctx.clip();
   let lo=1e9,hi=-1e9;
   for(let i=0;i<=60;i++){const wx=P.x-BEHIND+(AHEAD+BEHIND)*i/60,g=gAt(wx);
     if(g<lo)lo=g; if(g>hi)hi=g;}
   const span=Math.max(120,hi-lo);
-  const py=wx=>PY+PH-6-((hi-gAt(wx))/span)*(PH-14);
+  const py=wx=>PY+PH-5-((hi-gAt(wx))/span)*(PH-16);
   ctx.beginPath();
   for(let i=0;i<=PW;i++){const wx=P.x-BEHIND+(AHEAD+BEHIND)*i/PW;
     const yy=py(wx); if(i===0)ctx.moveTo(PX,yy);else ctx.lineTo(PX+i,yy);}
