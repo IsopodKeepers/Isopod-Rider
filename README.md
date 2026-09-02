@@ -1,6 +1,6 @@
 # ISOPOD RIDER
 
-A browser game. The whole game is **one file: `isopod-rider.html`**.
+A browser game. All the code is **one file: `isopod-rider.html`**; the sound effects live next to it in the `sfx/` folder (if you download the game to play offline, grab that folder too).
 This repo is the one true copy — no more sending the file back and forth.
 
 ## Play the latest version

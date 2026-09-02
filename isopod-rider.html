@@ -304,41 +304,32 @@ const norm=a=>{while(a>Math.PI)a-=2*Math.PI;while(a<-Math.PI)a+=2*Math.PI;return
 const angLerp=(a,b,t)=>a+norm(b-a)*t;
 
 /* ---------- sound ----------
-   Everything is synthesized with WebAudio; no audio files. The engine is a
-   pitched hum that follows speed, the music is a looping 8-bar racing riff.  */
+   Effects come from the WAV files in ./sfx (see sfx/README.txt); the music is a
+   looping 8-bar racing riff synthesized with WebAudio.  */
 const SND=(()=>{
   const AC=window.AudioContext||window.webkitAudioContext;
-  let ac=null,master=null,eng=null,grind=null,music=null,muted=false,nextBeat=0,beat=0;
+  let ac=null,master=null,music=null,muted=false,nextBeat=0,beat=0,started=false;
   const muteEl=document.getElementById('mute');
+  const FILES={hover:'01_ui_hover_wood_tick',click:'02_ui_click_deep_tap',select:'03_pod_select_plunk',
+    confirm:'04_start_confirm_deep_chime',pull:'05_pull_string_tension',snap:'06_release_snap',
+    whoomp:'07_launch_whoomp',rush:'08_air_rush_low',bounce:'09_soft_bounce_rubber',thunk:'10_hard_bounce_thunk',
+    booster:'11_booster_box_pulse',mist:'12_mist_lift',pickup:'13_pickup_chime',leaf:'14_leaf_hit',
+    impact:'15_ground_impact',perfect:'16_perfect_landing',over:'17_game_over_deep',fanfare:'18_high_score_deep_fanfare',
+    unlock:'19_unlock_achievement',tok:'20_mute_toggle_tok'};
+  const clips={};
+  for(const k in FILES){const a=new Audio('sfx/'+FILES[k]+'.wav');a.preload='auto';clips[k]=a;}
+  const live={};                                   // one held instance per name, for cut-offs
+  function play(name,vol=1){
+    if(muted||!started)return null;
+    const c=clips[name];if(!c)return null;
+    const a=c.cloneNode();a.volume=Math.min(1,vol);a.play().catch(()=>{});live[name]=a;return a;
+  }
+  function stop(name){const a=live[name];if(a){a.pause();delete live[name];}}
   function init(){
     if(ac||!AC)return;
     ac=new AC();master=ac.createGain();master.gain.value=muted?0:0.9;master.connect(ac.destination);
-    // engine: two detuned saws through a lowpass, pitch/volume set every frame
-    const o1=ac.createOscillator(),o2=ac.createOscillator(),lp=ac.createBiquadFilter(),g=ac.createGain();
-    o1.type='sawtooth';o2.type='square';o2.detune.value=7;lp.type='lowpass';lp.frequency.value=600;
-    g.gain.value=0;o1.connect(lp);o2.connect(lp);lp.connect(g);g.connect(master);o1.start();o2.start();
-    eng={o1,o2,lp,g};
-    // rail grind: filtered noise, gated on while on a rail
-    const buf=ac.createBuffer(1,ac.sampleRate,ac.sampleRate),d=buf.getChannelData(0);
-    for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1;
-    const n=ac.createBufferSource(),bp=ac.createBiquadFilter(),ng=ac.createGain();
-    n.buffer=buf;n.loop=true;bp.type='bandpass';bp.frequency.value=2600;bp.Q.value=1.2;
-    ng.gain.value=0;n.connect(bp);bp.connect(ng);ng.connect(master);n.start();
-    grind={g:ng,bp};
     music={g:ac.createGain()};music.g.gain.value=0.32;music.g.connect(master);
     nextBeat=ac.currentTime+0.1;
-  }
-  function tone(type,f0,f1,dur,vol,dest){
-    if(!ac)return;const o=ac.createOscillator(),g=ac.createGain(),t=ac.currentTime;
-    o.type=type;o.frequency.setValueAtTime(f0,t);o.frequency.exponentialRampToValueAtTime(Math.max(20,f1),t+dur);
-    g.gain.setValueAtTime(vol,t);g.gain.exponentialRampToValueAtTime(0.001,t+dur);
-    o.connect(g);g.connect(dest||master);o.start(t);o.stop(t+dur);
-  }
-  function noise(dur,vol,freq){
-    if(!ac)return;const n=ac.createBufferSource(),b=ac.createBuffer(1,ac.sampleRate*dur|0,ac.sampleRate),d=b.getChannelData(0);
-    for(let i=0;i<d.length;i++)d[i]=(Math.random()*2-1)*(1-i/d.length);
-    const f=ac.createBiquadFilter(),g=ac.createGain();f.type='lowpass';f.frequency.value=freq;
-    n.buffer=b;g.gain.value=vol;n.connect(f);f.connect(g);g.connect(master);n.start();
   }
   // racing riff: driving 8th-note bass + a lead melody, 150 bpm, loops every 8 bars
   const BPM=150,STEP=60/BPM/2;
@@ -371,27 +362,27 @@ const SND=(()=>{
     }
   }
   return {
-    start(){init();if(ac&&ac.state==='suspended')ac.resume();},
-    toggle(){muted=!muted;if(master)master.gain.value=muted?0:0.9;muteEl.textContent=muted?'sound off':'sound on';},
+    start(){init();if(ac&&ac.state==='suspended')ac.resume();if(!started){started=true;play('confirm',0.9);}},
+    select(){started=true;play('select',0.8);},
+    toggle(){muted=!muted;if(master)master.gain.value=muted?0:0.9;muteEl.textContent=muted?'sound off':'sound on';
+      if(!muted){started=true;play('tok',0.7);}},
     // called once per physics step
     update(spd,onGround,onRail,playing){
       if(!ac)return;schedule();
-      const target=playing?(onGround&&!onRail?0.10+Math.min(0.10,spd*0.006):0.05):0;
-      eng.g.gain.setTargetAtTime(target,ac.currentTime,0.05);
-      const f=55+spd*11;eng.o1.frequency.setTargetAtTime(f,ac.currentTime,0.05);eng.o2.frequency.setTargetAtTime(f*0.5,ac.currentTime,0.05);
-      eng.lp.frequency.setTargetAtTime(300+spd*60,ac.currentTime,0.05);
-      grind.g.gain.setTargetAtTime(onRail?0.18:0,ac.currentTime,0.03);
-      if(onRail)grind.bp.frequency.setTargetAtTime(1800+spd*120,ac.currentTime,0.05);
       music.g.gain.setTargetAtTime(playing?0.32:0.12,ac.currentTime,0.3);
     },
-    launch(){noise(0.25,0.35,1800);tone('sine',300,700,0.25,0.12);},
-    pop(q){tone('square',400,400+900*q,0.18,0.25);tone('sine',800,1600,0.25,0.15);},
-    land(clean){noise(0.12,clean?0.5:0.7,clean?900:500);tone('sine',clean?160:110,60,0.15,0.4);},
-    grindOn(){tone('square',900,1400,0.12,0.2);noise(0.2,0.4,4000);},
-    crash(){noise(0.5,0.9,700);tone('sawtooth',220,35,0.6,0.5);},
-    splash(){noise(0.5,0.7,1200);tone('sine',500,120,0.5,0.3);},
-    check(){tone('square',880,880,0.08,0.25);setTimeout(()=>tone('square',1320,1320,0.14,0.25),90);},
-    win(){[0,0.15,0.3,0.45,0.75].forEach((d,i)=>setTimeout(()=>tone('square',[523,659,784,1047,1319][i],[523,659,784,1047,1319][i],i===4?0.9:0.2,0.3),d*1000));},
+    load(){play('pull',0.7);},
+    release(){stop('pull');play('snap',0.6);},
+    launch(){play('whoomp',0.8);},
+    air(){play('rush',0.6);},
+    pop(q){q>0.62?play('unlock',0.9):play('bounce',0.7);},
+    land(clean,big){stop('rush');clean?(big?play('perfect',0.9):play('bounce',0.8)):play('thunk',0.9);},
+    grindOn(){stop('rush');play('leaf',0.8);},
+    crash(){stop('rush');play('impact',1);setTimeout(()=>play('over',0.8),120);},
+    splash(){stop('rush');play('mist',0.9);},
+    check(){play('pickup',0.8);},
+    boost(){play('booster',0.9);},
+    win(){play('fanfare',1);},
   };
 })();
 
@@ -416,7 +407,7 @@ cv.addEventListener('mousedown',e=>{
     const n=PODS.length,gap=126,x0=W/2-(n-1)*gap/2,y=H/2-30;
     for(let i=0;i<n;i++){const px=x0+i*gap;
       if(mx>px-52&&mx<px+52&&my>y-52&&my<y+72){
-        if(podIdx===i){started=true;SND.start();} else podIdx=i;   // click to select, click again to ride
+        if(podIdx===i){started=true;SND.start();} else {podIdx=i;SND.select();}   // click to select, click again to ride
         return;}}
     started=true;SND.start();
   }
@@ -510,6 +501,7 @@ function step(){
     // hold DOWN to squash into the hill. it scrubs a little speed, and if you let
     // go as the crest throws you, that stored load comes back as extra air.
     if(key.brake){
+      if(!P.wasLoad)SND.load();
       P.press=Math.min(1,P.press+0.055*T);
       P.spd-=BRAKE*0.45;                      // loading scrubs speed: that is the trade
       P.wasLoad=true;
@@ -517,6 +509,7 @@ function step(){
       // latch ONCE on the release edge. refreshing this every frame while the
       // compression decayed meant the timestamp landed after the launch itself.
       if(P.wasLoad&&P.press>0.30){P.relT=P.time;P.relAmt=P.press;}
+      if(P.wasLoad)SND.release();
       P.wasLoad=false;
       P.press=Math.max(0,P.press-0.14*T);
     }
@@ -549,7 +542,7 @@ function step(){
       P.relT=-999;
     }else{P.y=ny-R;P.prevVy=vy;P.ang=angAt(P.x);}
   }else{
-    P.air++;
+    P.air++;if(P.air===40)SND.air();
     if(key.back)P.lean-=LEAN;
     if(key.fwd)P.lean+=LEAN;
     // a thrown body swings to face its own arc: landings work by default,
@@ -597,7 +590,7 @@ function step(){
 
   if(!boost.hit&&Math.abs(P.x-BOOST_X)<BOOST_R*1.4&&Math.abs(P.y-(gAt(BOOST_X)-BOOST_R*1.15))<BOOST_R*1.4){
     boost.hit=true;P.boost=BOOST_T;P.spd*=BOOST_MUL;if(!P.ground){P.vx*=BOOST_MUL;}
-    note('BOOST!','#9fd8ff');SND.pop(1);
+    note('BOOST!','#9fd8ff');SND.boost();
   }
   if(P.boost>0){
     P.boost--;
@@ -656,7 +649,7 @@ function land(g){
   const diff=Math.abs(norm(P.lean-a));
   if(diff<CLEAN){
     P.spd=proj*1.10;                    // land it flush, keep the lot
-    note(P.air>=120?'BIG AIR':'SMOOTH','#d6f27a');puff(10,P.x,P.y+R,3);SND.land(true);
+    note(P.air>=120?'BIG AIR':'SMOOTH','#d6f27a');puff(10,P.x,P.y+R,3);SND.land(true,P.air>=120);
   }else if(diff<ROUGH){
     P.spd=proj*0.88;
     note('ROUGH','#ffd23f');puff(8,P.x,P.y+R,2.4);SND.land(false);
