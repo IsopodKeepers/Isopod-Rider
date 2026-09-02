@@ -315,7 +315,8 @@ const SND=(()=>{
     whoomp:'07_launch_whoomp',rush:'08_air_rush_low',bounce:'09_soft_bounce_rubber',thunk:'10_hard_bounce_thunk',
     booster:'11_booster_box_pulse',mist:'12_mist_lift',pickup:'13_pickup_chime',leaf:'14_leaf_hit',
     impact:'15_ground_impact',perfect:'16_perfect_landing',over:'17_game_over_deep',fanfare:'18_high_score_deep_fanfare',
-    unlock:'19_unlock_achievement',tok:'20_mute_toggle_tok',rumble:'21_speed_rumble_loop'};
+    unlock:'19_unlock_achievement',tok:'20_mute_toggle_tok',rumble:'21_speed_rumble_loop',
+    boing:'22_spring_boing',water:'23_water_splash'};
   const clips={};
   for(const k in FILES){if(k==='rumble')continue;const a=new Audio('sfx/'+FILES[k]+'.wav');a.preload='auto';clips[k]=a;}
   const live={};                                   // one held instance per name, for cut-offs
@@ -386,14 +387,14 @@ const SND=(()=>{
       if(rumble.el){rumble.el.volume+=((muted?0:0.55*k*k)-rumble.el.volume)*0.08;rumble.el.playbackRate=0.85+0.3*k;}
     },
     load(){play('pull',0.7);},
-    release(){stop('pull');play('snap',0.6);},
+    release(){stop('pull');play('boing',0.85);},
     launch(){play('whoomp',0.8);},
     air(){play('rush',0.6);},
     pop(q){q>0.62?play('unlock',0.9):play('bounce',0.7);},
     land(clean,big){stop('rush');clean?(big?play('perfect',0.9):play('bounce',0.8)):play('thunk',0.9);},
     grindOn(){stop('rush');play('leaf',0.8);},
     crash(){stop('rush');play('impact',1);setTimeout(()=>play('over',0.8),120);},
-    splash(){stop('rush');play('mist',0.9);},
+    splash(){stop('rush');play('water',1);setTimeout(()=>play('mist',0.5),150);},
     check(){play('pickup',0.8);},
     boost(){play('booster',0.9);},
     win(){play('fanfare',1);},
