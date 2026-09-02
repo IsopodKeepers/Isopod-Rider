@@ -29,5 +29,7 @@ Included:
 19_unlock_achievement.wav
 20_mute_toggle_tok.wav
 21_speed_rumble_loop.wav   (added later: seamless low-frequency air-rush loop, volume follows speed)
+22_spring_boing.wav        (added later: springy jump release)
+23_water_splash.wav        (added later: water landing plunge + spray)
 
 All audio in this pack was synthesized specifically for this project; no third-party samples are included.
