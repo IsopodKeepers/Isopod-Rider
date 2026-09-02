@@ -28,5 +28,6 @@ Included:
 18_high_score_deep_fanfare.wav
 19_unlock_achievement.wav
 20_mute_toggle_tok.wav
+21_speed_rumble_loop.wav   (added later: seamless low-frequency air-rush loop, volume follows speed)
 
 All audio in this pack was synthesized specifically for this project; no third-party samples are included.
