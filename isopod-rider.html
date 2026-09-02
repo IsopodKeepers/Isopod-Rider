@@ -308,16 +308,16 @@ const angLerp=(a,b,t)=>a+norm(b-a)*t;
    looping 8-bar racing riff synthesized with WebAudio.  */
 const SND=(()=>{
   const AC=window.AudioContext||window.webkitAudioContext;
-  let ac=null,master=null,music=null,muted=false,nextBeat=0,beat=0,started=false;
+  let ac=null,master=null,music=null,muted=false,nextBeat=0,beat=0,started=false,rumble=null;
   const muteEl=document.getElementById('mute');
   const FILES={hover:'01_ui_hover_wood_tick',click:'02_ui_click_deep_tap',select:'03_pod_select_plunk',
     confirm:'04_start_confirm_deep_chime',pull:'05_pull_string_tension',snap:'06_release_snap',
     whoomp:'07_launch_whoomp',rush:'08_air_rush_low',bounce:'09_soft_bounce_rubber',thunk:'10_hard_bounce_thunk',
     booster:'11_booster_box_pulse',mist:'12_mist_lift',pickup:'13_pickup_chime',leaf:'14_leaf_hit',
     impact:'15_ground_impact',perfect:'16_perfect_landing',over:'17_game_over_deep',fanfare:'18_high_score_deep_fanfare',
-    unlock:'19_unlock_achievement',tok:'20_mute_toggle_tok'};
+    unlock:'19_unlock_achievement',tok:'20_mute_toggle_tok',rumble:'21_speed_rumble_loop'};
   const clips={};
-  for(const k in FILES){const a=new Audio('sfx/'+FILES[k]+'.wav');a.preload='auto';clips[k]=a;}
+  for(const k in FILES){if(k==='rumble')continue;const a=new Audio('sfx/'+FILES[k]+'.wav');a.preload='auto';clips[k]=a;}
   const live={};                                   // one held instance per name, for cut-offs
   function play(name,vol=1){
     if(muted||!started)return null;
@@ -330,6 +330,15 @@ const SND=(()=>{
     ac=new AC();master=ac.createGain();master.gain.value=muted?0:0.9;master.connect(ac.destination);
     music={g:ac.createGain()};music.g.gain.value=0.32;music.g.connect(master);
     nextBeat=ac.currentTime+0.1;
+    // speed rumble: seamless WebAudio loop, volume/pitch follow speed
+    rumble={g:ac.createGain(),src:null};rumble.g.gain.value=0;rumble.g.connect(master);
+    const fallback=()=>{     // file:// blocks fetch -> fall back to a looping <audio> element
+      const a=new Audio('sfx/'+FILES.rumble+'.wav');a.loop=true;a.volume=0;a.play().catch(()=>{});rumble.el=a;
+    };
+    if(location.protocol==='file:')fallback();
+    else fetch('sfx/'+FILES.rumble+'.wav').then(r=>r.arrayBuffer()).then(b=>ac.decodeAudioData(b)).then(buf=>{
+      const s=ac.createBufferSource();s.buffer=buf;s.loop=true;s.connect(rumble.g);s.start();rumble.src=s;
+    }).catch(fallback);
   }
   // racing riff: driving 8th-note bass + a lead melody, 150 bpm, loops every 8 bars
   const BPM=150,STEP=60/BPM/2;
@@ -370,6 +379,11 @@ const SND=(()=>{
     update(spd,onGround,onRail,playing){
       if(!ac)return;schedule();
       music.g.gain.setTargetAtTime(playing?0.32:0.12,ac.currentTime,0.3);
+      // rumble swells from ~speed 6 to full at top speed; silent at a crawl or on the menu
+      const k=playing?Math.max(0,Math.min(1,(spd-6)/14)):0;
+      rumble.g.gain.setTargetAtTime(0.55*k*k,ac.currentTime,0.25);
+      if(rumble.src)rumble.src.playbackRate.setTargetAtTime(0.85+0.3*k,ac.currentTime,0.4);
+      if(rumble.el){rumble.el.volume+=((muted?0:0.55*k*k)-rumble.el.volume)*0.08;rumble.el.playbackRate=0.85+0.3*k;}
     },
     load(){play('pull',0.7);},
     release(){stop('pull');play('snap',0.6);},
