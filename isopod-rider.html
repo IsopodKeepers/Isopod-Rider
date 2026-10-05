@@ -4531,7 +4531,7 @@ function drawBuilder(){
     }
   }
   ctx.fillStyle='rgba(10,20,16,0.85)';ctx.fillRect(0,0,W,20);
-  ctx.fillStyle='#ffd23f';ctx.fillText('TRACK BUILDER',6,5);
+  ctx.fillStyle=bLocked()?'#9fb89f':'#ffd23f';ctx.fillText(bLocked()?'LOCKED ORIGINAL':'YOUR TRACK',6,5);
   ctx.fillStyle='#cfe0bb';
   ctx.fillText(bSim?('yellow line = holding gas the whole way  \u00b7  '+
     (bSim.won?'finishes in '+bSim.t.toFixed(2)+'s':'does NOT finish')+
@@ -4546,6 +4546,8 @@ const BCSS=`#builder{position:fixed;top:0;right:0;bottom:0;width:${BUILDER_W}px;
 #builder h2{font-size:14px;color:#ffd23f;margin:2px 0 8px;display:flex;justify-content:space-between}
 #builder .lock{background:#24301f;border:1px solid #4d6b3f;border-radius:4px;padding:6px 8px;margin:6px 0;line-height:1.5}
 #builder .lock button{margin-top:5px}
+#builder .mine{background:#3a3010;border:1px solid #ffd23f;border-radius:4px;padding:6px 8px;margin:6px 0;line-height:1.5;color:#ffe9a0}
+#builder .mine b{color:#ffd23f}
 #builder input[type=range]:disabled{opacity:.45}
 #builder h3{font-size:11px;color:#8fb59a;margin:12px 0 5px;text-transform:uppercase;letter-spacing:1px}
 #builder button,#bModal button{background:#24422f;color:#e8f0d8;border:1px solid #3a6b4b;border-radius:4px;padding:4px 8px;font:11px Verdana,sans-serif;cursor:pointer}
@@ -4568,6 +4570,7 @@ const BCSS=`#builder{position:fixed;top:0;right:0;bottom:0;width:${BUILDER_W}px;
 #bModal>div{background:#0f1f18;border:3px solid #24422f;border-radius:6px;padding:14px;width:min(720px,94vw);color:#cfe0bb;font:12px Verdana,sans-serif}
 #bModal textarea{width:100%;height:220px;background:#0a1410;color:#e8f0d8;border:1px solid #3a6b4b;font:11px monospace;margin:8px 0}`;
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const titleCase=s=>String(s).toLowerCase().replace(/\b[a-z]/g,c=>c.toUpperCase());
 function bPanel(){
   let el=document.getElementById('builder');
   if(!el){
@@ -4595,7 +4598,8 @@ function bPanel(){
   <div class="row"><select data-act="level">${LEVELS.map((T,i)=>`<option value="${i}" ${i===levelIdx?'selected':''}>${esc(T.n)}${T.edited?' (edited)':''}</option>`).join('')}</select>
    <button data-act="new">+ New track</button></div>
   ${bLocked()?`<div class="lock"><b>Locked:</b> one of the original tracks: you can look and ride, not change it.
-   <button class="go" data-act="copytrack">Copy as my own track</button></div>`:''}
+   <button class="go" data-act="copytrack">Copy as my own track</button></div>`:
+   `<div class="mine"><b>YOUR TRACK</b>${L.from?' – copy of '+esc(titleCase(L.from)):''}. Changes here never touch the original tracks.</div>`}
   ${!bLocked()?`<div class="row">${L.custom?`Name <input type="text" data-act="name" value="${esc(L.n)}" style="width:150px">`:`<b>${esc(L.n)}</b>`}
    Look <select data-act="theme">${Object.keys(THEMES).map(t=>`<option value="${t}" ${t===L.th?'selected':''}>${THEME_NAMES[t]||t}</option>`).join('')}</select>
    <label><input type="checkbox" data-act="flat" ${L.flat?'checked':''}> flat</label></div>`:''}
@@ -4725,7 +4729,7 @@ function bChange(e){
   else if(act==='flat'){bEdit(()=>{L.flat=e.target.checked;});}
 }
 function bNewTrack(from){
-  let nm=(prompt('Name for the new track?',from?'MY '+from.n:'MY TRACK')||'').trim().toUpperCase(); if(!nm)return;
+  let nm=(prompt('Name for the new track?',from?from.n+' – MY VERSION':'MY TRACK')||'').trim().toUpperCase(); if(!nm)return;
   while(LEVELS.some(T=>T.n===nm))nm+=' 2';
   const T={n:nm,seq:'kWj',len:20000,fg:1.6,th:bLv().th,flat:true,nofin:true,par:30,custom:true,edited:true};
   if(from){for(const k of ['seq','len','fg','th','flat','par'])if(from[k]!==undefined)T[k]=from[k];
