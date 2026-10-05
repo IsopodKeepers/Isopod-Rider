@@ -384,15 +384,16 @@ const LEVELS_FILE=LEVELS.map(L=>JSON.stringify(L));
 const BUILDKEY='isopodRider.builder.v1';
 try{
   const sv=JSON.parse(localStorage.getItem(BUILDKEY)||'{}'), same=(L,e)=>
-    L.seq===e.seq&&JSON.stringify(L.tune||{})===JSON.stringify(e.tune||{});
+    L.seq===e.seq&&JSON.stringify(L.tune||{})===JSON.stringify(e.tune||{})&&L.th===(e.th||L.th)&&!!L.flat===(e.flat===undefined?!!L.flat:!!e.flat),
+    look=e=>Object.assign({},e.th?{th:e.th}:{},e.flat!==undefined?{flat:!!e.flat}:{});
   for(const c of sv.custom||[]){
     const L=LEVELS.find(T=>T.n===c.n);
-    if(L&&L.mine){if(!same(L,c))Object.assign(L,{seq:c.seq,tune:c.tune,len:c.len,edited:true});continue;}
+    if(L&&L.mine){if(!same(L,c))Object.assign(L,{seq:c.seq,tune:c.tune,len:c.len,edited:true},look(c));continue;}
     if(L)while(LEVELS.some(T=>T.n===c.n))c.n+=' 2';
     LEVELS.push(Object.assign(c,{custom:true,edited:true}));
   }
   for(const L of LEVELS){const e=L.mine&&sv.edits&&sv.edits[L.n];
-    if(e&&!same(L,e))Object.assign(L,{seq:e.seq,tune:e.tune,len:e.len,edited:true});}
+    if(e&&!same(L,e))Object.assign(L,{seq:e.seq,tune:e.tune,len:e.len,edited:true},look(e));}
   for(const L of LEVELS)if(L.tune===undefined)delete L.tune;
 }catch(e){}
 const TH=()=>THEMES[LEVELS[levelIdx].th];
@@ -4288,12 +4289,12 @@ function levelSig(L){
 }
 const fileLevel=i=>i<LEVELS_FILE.length?JSON.parse(LEVELS_FILE[i]):null;
 const sameAsFile=(L,i)=>{const F=fileLevel(i);
-  return !!F&&!L.custom&&F.seq===L.seq&&JSON.stringify(F.tune||{})===JSON.stringify(L.tune||{});};
+  return !!F&&!L.custom&&F.seq===L.seq&&JSON.stringify(F.tune||{})===JSON.stringify(L.tune||{})&&F.th===L.th&&!!F.flat===!!L.flat;};
 function saveBuilder(){try{
   const sv={edits:{},custom:[]};
   LEVELS.forEach((L,i)=>{
     if(L.custom){const o=Object.assign({},L);delete o.custom;delete o.edited;sv.custom.push(o);}
-    else if(L.edited)sv.edits[L.n]={seq:L.seq,tune:L.tune,len:L.len};
+    else if(L.edited)sv.edits[L.n]={seq:L.seq,tune:L.tune,len:L.len,th:L.th,flat:!!L.flat};
   });
   localStorage.setItem(BUILDKEY,JSON.stringify(sv)); bSaved=Date.now();
 }catch(e){bSaved=-1;}}
@@ -4356,14 +4357,14 @@ function setSeq(L,seq,ta){
   ta.forEach((o,i)=>{if(o&&Object.keys(o).length)t[i]=o;});
   if(Object.keys(t).length)L.tune=t;else delete L.tune;
 }
-const bState=()=>JSON.stringify({seq:bLv().seq,tune:bLv().tune||null,len:bLv().len});
+const bState=()=>JSON.stringify({seq:bLv().seq,tune:bLv().tune||null,len:bLv().len,th:bLv().th,flat:!!bLv().flat});
 function bCommit(before){bUndo.push({lvl:levelIdx,s:before});if(bUndo.length>200)bUndo.shift();bRedo.length=0;}
 function bUndoLast(redo){
   const from=redo?bRedo:bUndo, to=redo?bUndo:bRedo, u=from.pop(); if(!u)return;
   if(u.lvl!==levelIdx){loadLevel(u.lvl);}
   to.push({lvl:u.lvl,s:bState()});
   const s=JSON.parse(u.s), L=bLv();
-  L.seq=s.seq;L.len=s.len;if(s.tune)L.tune=s.tune;else delete L.tune;
+  L.seq=s.seq;L.len=s.len;if(s.th)L.th=s.th;L.flat=!!s.flat;if(s.tune)L.tune=s.tune;else delete L.tune;
   bApply();bPanel();
 }
 
@@ -4595,7 +4596,7 @@ function bPanel(){
    <button data-act="new">+ New track</button></div>
   ${bLocked()?`<div class="lock"><b>Locked:</b> one of the original tracks: you can look and ride, not change it.
    <button class="go" data-act="copytrack">Copy as my own track</button></div>`:''}
-  ${L.custom?`<div class="row">Name <input type="text" data-act="name" value="${esc(L.n)}" style="width:150px">
+  ${!bLocked()?`<div class="row">${L.custom?`Name <input type="text" data-act="name" value="${esc(L.n)}" style="width:150px">`:`<b>${esc(L.n)}</b>`}
    Look <select data-act="theme">${Object.keys(THEMES).map(t=>`<option value="${t}" ${t===L.th?'selected':''}>${THEME_NAMES[t]||t}</option>`).join('')}</select>
    <label><input type="checkbox" data-act="flat" ${L.flat?'checked':''}> flat</label></div>`:''}
   <div id="bStats"></div>
@@ -4720,7 +4721,7 @@ function bChange(e){
   if(act==='level'){loadLevel(+e.target.value);bSel=0;bApply();bPanel();bFocus(0);}
   else if(act==='name'){const nm=e.target.value.trim().toUpperCase();
     if(nm&&!LEVELS.some(T=>T!==L&&T.n===nm)){PROPS[nm]=PROPS[L.n];L.n=nm;}bApply();bPanel();}
-  else if(act==='theme'){L.th=e.target.value;bApply();}
+  else if(act==='theme'){bEdit(()=>{L.th=e.target.value;});}
   else if(act==='flat'){bEdit(()=>{L.flat=e.target.checked;});}
 }
 function bNewTrack(from){
@@ -4742,7 +4743,7 @@ function bRevert(){
   }else{
     if(!confirm('Put "'+L.n+'" back the way the game file has it? (Undo can bring your version back.)'))return;
     bCommit(bState());
-    const F=fileLevel(i);L.seq=F.seq;L.len=F.len;if(F.tune)L.tune=F.tune;else delete L.tune;
+    const F=fileLevel(i);L.seq=F.seq;L.len=F.len;L.th=F.th;L.flat=F.flat;if(F.tune)L.tune=F.tune;else delete L.tune;
   }
   bSel=0;bApply();bPanel();bFocus(0);
 }
