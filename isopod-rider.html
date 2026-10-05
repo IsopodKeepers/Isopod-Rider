@@ -19,7 +19,7 @@
 <div id="wrap">
   <canvas id="c" width="760" height="420"></canvas>
   <div id="hint">
-    <kbd>↑</kbd> gas &nbsp; <kbd>space</kbd> load / brake &nbsp; <kbd>←</kbd><kbd>→</kbd> lean &nbsp; <kbd>R</kbd> restart &nbsp; <kbd>M</kbd> music &nbsp; <kbd>]</kbd> skip song &nbsp; <kbd>P</kbd> place mode
+    <kbd>↑</kbd> gas &nbsp; <kbd>space</kbd> load / brake &nbsp; <kbd>←</kbd><kbd>→</kbd> lean &nbsp; <kbd>R</kbd> restart &nbsp; <kbd>M</kbd> music &nbsp; <kbd>]</kbd> skip song &nbsp; <kbd>B</kbd> track builder
   </div>
 </div>
 <script>
@@ -27,7 +27,9 @@
 "use strict";
 const W=760,H=420,cv=document.getElementById('c'),ctx=cv.getContext('2d');
 ctx.imageSmoothingEnabled=false;
-function fit(){const s=Math.max(1,Math.min(innerWidth/W,(innerHeight-70)/H));
+let building=false; const BUILDER_W=340;
+function fit(){const pw=building?BUILDER_W:0;document.body.style.paddingRight=pw+'px';
+  const s=Math.max(pw?0.5:1,Math.min((innerWidth-pw)/W,(innerHeight-70)/H));
   cv.style.width=(W*s|0)+'px';cv.style.height=(H*s|0)+'px';}
 addEventListener('resize',fit);fit();
 
@@ -206,6 +208,7 @@ const PROPS={
   // position or size, because nothing there launches you.
   'MAIN STREET':[{a:'billboard',x:3150}],
 };
+const PROPS_BASE=JSON.parse(JSON.stringify(PROPS));
 
 // Called from build(), after the terrain exists, so colliders land at the right height.
 function buildPropColliders(){
@@ -374,6 +377,25 @@ const LEVELS=[
   {n:'MAIN STREET', seq:'yEU2NWz',          len:34000, fg:1.60, th:'parade', flat:true, nofin:true, par:35, md:[40.3,35.1,34.2,33.6], lay:2},  // PROVISIONAL: no human lap yet
   {n:'THE SANDLOT', seq:'WQJ2nW',          len:34000, fg:1.55, th:'orbit', flat:true, nofin:true, par:29, md:[33.5,28.9,28.3,27.80]},  // human best 27.94
 ];
+// Tracks as the file ships them (for "revert"), then any builder work saved in this
+// browser on top. Only tracks made in the builder (custom here, mine:true once exported
+// into the file) can change; the original tracks are locked.
+const LEVELS_FILE=LEVELS.map(L=>JSON.stringify(L));
+const BUILDKEY='isopodRider.builder.v1';
+try{
+  const sv=JSON.parse(localStorage.getItem(BUILDKEY)||'{}'), same=(L,e)=>
+    L.seq===e.seq&&JSON.stringify(L.tune||{})===JSON.stringify(e.tune||{})&&L.th===(e.th||L.th)&&!!L.flat===(e.flat===undefined?!!L.flat:!!e.flat),
+    look=e=>Object.assign({},e.th?{th:e.th}:{},e.flat!==undefined?{flat:!!e.flat}:{});
+  for(const c of sv.custom||[]){
+    const L=LEVELS.find(T=>T.n===c.n);
+    if(L&&L.mine){if(!same(L,c))Object.assign(L,{seq:c.seq,tune:c.tune,len:c.len,edited:true},look(c));continue;}
+    if(L)while(LEVELS.some(T=>T.n===c.n))c.n+=' 2';
+    LEVELS.push(Object.assign(c,{custom:true,edited:true}));
+  }
+  for(const L of LEVELS){const e=L.mine&&sv.edits&&sv.edits[L.n];
+    if(e&&!same(L,e))Object.assign(L,{seq:e.seq,tune:e.tune,len:e.len,edited:true},look(e));}
+  for(const L of LEVELS)if(L.tune===undefined)delete L.tune;
+}catch(e){}
 const TH=()=>THEMES[LEVELS[levelIdx].th];
 let levelIdx=0;
 // GHOST: every run is recorded frame by frame. Beat your best on a track and that
@@ -405,7 +427,7 @@ function medalsWon(i){
 // Best times persist; ghosts do not (a recording is ~3 numbers x thousands of frames,
 // which is too much to push into storage every run).
 const BESTKEY='isopodRider.best.v1';
-const layKey=L=>L.n+'|'+(L.lay||1);
+const layKey=L=>L.n+'|'+(L.lay||1)+(L.edited?'|'+levelSig(L):'');
 function saveBest(){try{
   localStorage.setItem(BESTKEY,JSON.stringify(LEVELS.map((L,i)=>[layKey(L),bestT[i]])));
 }catch(e){}}
@@ -454,13 +476,13 @@ const KICK_RUN=126, KICK_H=34, KICK_GAP=600; // sized so the arc PEAKS on the fl
                                              // already falling when it meets the rail
 const RAIL_IN=40, RAIL_UP=74;   // how high the bar stands over the step noses
 const RAIL_LEAD=140;
-const RAIL_OUT=420;             // how far past the bar the far bank sits
+let RAIL_OUT=420;             // how far past the bar the far bank sits
 const POP_GAP=520;   // resized: the loop changes what you carry into it
 const WHOOP_N=7, WHOOP_L=155, WHOOP_H=22;   // short enough that a pop clears the lot
 const WHOOP_TILT=0.07;
 const WHOOP_IN=0.3;
 const UPW_N=9, UPW_L=170, UPW_H=28, UPW_TILT=-0.24;   // UPHILL whoops: they climb
-const SP_RAMP=230, SP_LIP=0.70, SP_GAP=560, SP_UP=120, SP_FACE=420, SP_DECK=760, SP_KICK=0.56, SP_DROP=520;
+let SP_RAMP=230, SP_LIP=0.70, SP_GAP=560, SP_UP=120, SP_FACE=420, SP_DECK=760, SP_KICK=0.56, SP_DROP=520;
 // The level grew when the stairs and bus jump went in, so the parallax came down to
 // keep the plate covering it in one pass: width must beat finish*parallax + viewport.
 const STREET_H=1.90, STREET_PAR=0.055;   // taller crop + slow drift = one pass, no repeat
@@ -468,10 +490,10 @@ const STREET_H=1.90, STREET_PAR=0.055;   // taller crop + slow drift = one pass,
 // long empty street between the whoops and the stairs.
 // BJ_IN is the gap between the stair runout and the bus kicker -- 560 left a long
 // empty street after the grind.
-const BJ_IN=180, BJ_RAMP=230, BJ_LIP=0.74, BJ_GAP=900, BJ_AT=398, BJ_AT2=728;
-const KS_N1=8, KS_N2=9, KS_LAND=190;   // two flights with a landing between
-const CS_N=16, CS_RUN=54, CS_RISE=30, CS_IN=790;   // longer than Baja's nine steps
-const RK_IN=520, RK_RAMP=210, RK_LIP=0.60, RK_FLAT=420, RK_GAP=760, RK_COUNT=8, RK_SPACE=186, RK_SCALE=1;   // bumper to bumper: gaps let the arc drop through
+let BJ_IN=180, BJ_RAMP=230, BJ_LIP=0.74, BJ_GAP=900, BJ_AT=398, BJ_AT2=728;
+let KS_N1=8, KS_N2=9, KS_LAND=190;   // two flights with a landing between
+let CS_N=16, CS_RUN=54, CS_RISE=30, CS_IN=790;   // longer than Baja's nine steps
+let RK_IN=520, RK_RAMP=210, RK_LIP=0.60, RK_FLAT=420, RK_GAP=760, RK_COUNT=8, RK_SPACE=186, RK_SCALE=1;   // bumper to bumper: gaps let the arc drop through
 // Measured, not reasoned: sloping the row DOWN made the grind steadily worse (0.85s
 // flat, 0.27s at 0.08, 0.12s at 0.20). Flat ground keeps the most racks inside the
 // height band your arc passes through.
@@ -488,37 +510,37 @@ const RK_IN=520, RK_RAMP=210, RK_LIP=0.60, RK_FLAT=420, RK_GAP=760, RK_COUNT=8, 
 // speed, which is why it felt like it needed a preload. Flattening the ground under
 // the row shifted the arc again and 660 dropped to 5 of 7; 600 catches 7 of 7.
 // Re-run the speed sweep after ANY change to the ramp, the ground, or the row.
-const SW_IN=420, SW_RAMP=250, SW_LIP=0.88, SW_FLAT=520, SW_GAP=660, SW_RUN=170, SW_H=90, SW_COUNT=3;
+let SW_IN=420, SW_RAMP=250, SW_LIP=0.88, SW_FLAT=520, SW_GAP=660, SW_RUN=170, SW_H=90, SW_COUNT=3;
 // Three bars with real 317px gaps, so linking them needs a hop. This trades away some
 // roll-on forgiveness: with the bars near-continuous the entry caught at 7 of 7
 // approach speeds, and gapped it catches 4 of 7. That is the cost of the gaps -- the
 // landing zone is genuinely smaller. SW_GAP 600 would give 6 of 7 entry but only links
 // 2 of 3 bars; 660 lands you mid-bar with room to set up, and links all three.
-const SW_LINK=520;
+let SW_LINK=520;
 const RK_ROW=1600, RK_SLOPE=0.0, RK_SKIP=1;   // drop the first rack, keep the rest in place   // placed where the arc falls back through bar height
-const TG_RAMP=250, TG_LIP=0.80, TG_GAP=1000, TENT_W=520, TENT_H=130, TENT_AT=0.52;
-const DS_RUN=420, DS_RAMP=240, DS_LIP=0.70, DS_GAP1=460, DS_MOUND=110, DS_GAP2=560;
+let TG_RAMP=250, TG_LIP=0.80, TG_GAP=1000, TENT_W=520, TENT_H=130, TENT_AT=0.52;
+let DS_RUN=420, DS_RAMP=240, DS_LIP=0.70, DS_GAP1=460, DS_MOUND=110, DS_GAP2=560;
 const DS_RL=300, DS_RH=30;   // rollers on the runout, so the mound line can pump back
-const GS_RAMP=240, GS_LIP=0.74, GS_GAP=560, GS_TIERS=4, GS_RUN=150, GS_RISE=58, GS_GAP2=620;
-const FB_RAMP=230, FB_LIP=0.86, FB_GAP=420, FB_UP=90, FB_DECK=1100, FB_DROP=0.62, FB_ROLLOFF=560, FB_CATCH=560;
+let GS_RAMP=240, GS_LIP=0.74, GS_GAP=560, GS_TIERS=4, GS_RUN=150, GS_RISE=58, GS_GAP2=620;
+let FB_RAMP=230, FB_LIP=0.86, FB_GAP=420, FB_UP=90, FB_DECK=1100, FB_DROP=0.62, FB_ROLLOFF=560, FB_CATCH=560;
 const FD_L=275, FD_H=22;        // deck rollers: spacing and height
 const FH_L=470, FH_H=58, FH_TILT=0.16;   // the three landing humps: spacing, height, fall
-const FB_BAR_IN=0, FB_BAR_H=40, FB_BAR_END=340;   // how far in the bar starts, how high it sits
-const RT_RAMP=230, RT_LIP=0.62, RT_GAP=520, RT_ROLL=120, RT_RH=30, RT_SHELF=120, RT_SHELFW=520;
-const BAR_LEN=900, BAR_H=120, BAR_FALL=180, BAR_KICK=0.58, BAR_LEAD=150;
+let FB_BAR_IN=0, FB_BAR_H=40, FB_BAR_END=340;   // how far in the bar starts, how high it sits
+let RT_RAMP=230, RT_LIP=0.62, RT_GAP=520, RT_ROLL=120, RT_RH=30, RT_SHELF=120, RT_SHELFW=520;
+let BAR_LEN=900, BAR_H=120, BAR_FALL=180, BAR_KICK=0.58, BAR_LEAD=150;
 const UPW_TOP=true;             // finish at the top of the climb, no descent after
 const HUMP_L=400, HUMP_H=54;
 const BOAT_GAP=480, BOAT_DEEP=64;
 // A DJ BOOTH: two big decks with the mixer between them. FLUSH with the floor --
 // any lip launches you clean over the platter, which is why the first version did
 // nothing at all (0.03s of contact across five records).
-const DECK_N=2, DECK_W=760, DECK_GAP=420, DECK_H=0;
-const STAGE_RAMP=220, STAGE_GAP=340, STAGE_UP=190, STAGE_FACE=380;
+let DECK_N=2, DECK_W=760, DECK_GAP=420, DECK_H=0;
+let STAGE_RAMP=220, STAGE_GAP=340, STAGE_UP=190, STAGE_FACE=380;
 const MIX_H=34;
 const LAP_W=300, LAP_H=86, LAP_RISE=150;   // lid width, how tall it stands, the rise onto it                 // how far the mixer stands off the table   // kicker, pit, stage height
 const DECK_PULL=0.06;           // how hard a platter drags or drives you, per frame
 const DECK_PUSH=0.055, DECK_DRAG=0.075;                // how hard each way nudges you
-const LEDGE_RUN=900, LEDGE_DROP=980, LEDGE_STEEP=0.62;
+let LEDGE_RUN=900, LEDGE_DROP=980, LEDGE_STEEP=0.62;
 const ROLL_L=245, ROLL_H=26;
 const LEDGE_OVER=750;           // how gradually the platform tips into the drop    // roller spacing and height on the descent  // platform, drop, steepness
 const LONG_N=14;                // bumps in the long whoops run
@@ -531,8 +553,8 @@ const UMB_H=38, UMB_SP=500, UMB_POP=3.4, UMB_IN=520, UMB_R=130;    // canopy hei
                                             // carries you, or the chain breaks             // drop length on the final descent          // gentle, CONTROLLED fall across the section, so it
                                 // skims -- dead level and you bog down in the troughs
 const LOOP_R=104;               // loop radius: needs v >= sqrt(5*g*r) at the bottom              // the pop-only gap after the hill            // level run at the top of the bar -- the landing target            // level run at the top of the bar -- the landing target                // handrail: where it starts, how high it stands
-const CASTLE_GAP=430;            // how far past the kicker the castle sits
-const CASTLE_W=76, CASTLE_H=96;  // the sand castle you have to clear        // bar height above the gap floor -- set so its start sits
+let CASTLE_GAP=430;            // how far past the kicker the castle sits
+let CASTLE_W=76, CASTLE_H=96;  // the sand castle you have to clear        // bar height above the gap floor -- set so its start sits
                          // at the peak of the jump, not below it        // how high the bar floats above the gap floor        // how far the rail floats above the dip floor
 let FINALE_GAP=1.70;   // how much wider the last gap is than a normal dirt jump
 const jumps=[], checks=[];
@@ -1656,15 +1678,20 @@ function build(){
   jumps.length=0;checks.length=0;waters.length=0;rails.length=0;tubes.length=0;ramps.length=0;castles.length=0;surf.length=0;loops.length=0;umbs.length=0;boats.length=0;platters.length=0;stages.length=0;mixers.length=0;laptops.length=0;bars.length=0;flatbars.length=0;stands.length=0;tents.length=0;
   for(let x=0;x<MAXW;x++)G[x]=base(Math.min(x,LEN));
   for(let x=0;x<340;x++)G[x]=G[340];
-  const seq=SEQ.split('');
+  const seq=SEQ.split(''), TU=LEVELS[levelIdx].tune||{};
+  const Lb=LEVELS[levelIdx];   // a copied track keeps the original's hand-placed props
+  PROPS[Lb.n]=(PROPS_BASE[Lb.n]||PROPS_BASE[Lb.from]||[]).map(q=>Object.assign({},q));
+  pieceSpans.length=0;
   let x=560;
   for(let i=0;i<seq.length&&x<LEN-5400;i++){
     const k=seq[i];
-    const r = k==='J' ? tubeFeature(x) : k==='Q' ? swingFeature(x) : k==='U' ? busJump(x) : k==='K' ? kinkStairs(x) : k==='E' ? cityStairs(x) : k==='z' ? rackFeature(x) : k==='t' ? tentGap(x) : k==='N' ? stepPair(x,true) : k==='n' ? stepPair(x) : k==='2' ? doubleSingle(x) : k==='G' ? grandstand(x) : k==='F' ? flatbar(x) : k==='y' ? rhythmTwo(x) : k==='c' ? barricade(x,BAR_LEN) : k==='C' ? barricade(x,Math.round(BAR_LEN*1.7)) : k==='A' ? whoops(x,UPW_N,UPW_L,UPW_H,UPW_TILT) : k==='T' ? turntable(x,DECK_N) : k==='v' ? ledge(x,LEDGE_DROP) : k==='L' ? whoops(x,LONG_N,WHOOP_L,WHOOP_H) : k==='B' ? boatGap(x,BOAT_GAP) : k==='H' ? whoops(x,3,HUMP_L,HUMP_H) : k==='U' ? umbrellas(x,4,UMB_SP) : k==='X' ? descent(x,4,DESC_GAP) : k==='W' ? whoops(x,WHOOP_N,WHOOP_L,WHOOP_H) : k==='O' ? vertLoop(x,LOOP_R) : k==='P' ? popGap(x,POP_GAP) : k==='R' ? rhythm(x,[560,580,400],0.26) : k==='S' ? stairSet(x,9,52,30) : k==='b' ? ballCastle(x) : k==='D' ? dune(x,1.0) : k==='g' ? railJump(x) : k==='w' ? waterGap(x,1.0) : k==='d' ? mHill(x) : k==='u' ? stepUp(x) : k==='j' ? dirtJump(x,1.15) : k==='k' ? dirtJump(x,0.62) : giantHill(x,...HILLS[k].p);
+    const r=makePiece(k,x,TU[i]);
+    if(!r)continue;
     jumps.push({x:r.crest,kind:k,start:x,second:r.second,end:r.end,
                 bowlAt:r.bowlAt,shelfAt:r.shelfAt,joinAt:r.joinAt,tiersAt:r.tiersAt,bottomAt:r.bottomAt,lip2At:r.lip2At,moundAt:r.moundAt,landAt:r.landAt,topAt:r.topAt,botAt:r.botAt,kinkAt:r.kinkAt,busX:r.busX,swingX:r.swingX,busX2:r.busX2,tubeX:r.tubeX,tentAt:r.tentAt,rackX:r.rackX,deckAt2:r.deckAt2,
                 deckAt:r.deckAt,deckEnd:r.deckEnd,humpAt:r.humpAt});
-    x=r.end+(k==='j'||k==='k'?95:k==='d'||k==='u'||k==='w'||k==='g'?90:80);
+    pieceSpans.push({i,k,a:x,b:r.end});
+    x=r.end+pieceVals(k,TU[i]).space;
   }
   // FINALE: a proper gap jump, sized so you have to commit rather than sail over it.
   // A level still under construction can skip it and just end after its last feature.
@@ -1708,6 +1735,7 @@ const MAP={ArrowUp:'gas',KeyW:'gas',Space:'brake',ArrowDown:'brake',KeyS:'brake'
 addEventListener('keydown',e=>{
   startMusic();                              // any key counts as the interaction
   if(titleUp){titleUp=false;e.preventDefault();return;}   // any button leaves the title
+  if(builderKey(e))return;
   if(e.code==='Escape'){const pb=document.getElementById('propBox');if(pb){pb.remove();e.preventDefault();return;}}
   if(EDITOR&&e.code==='KeyP'){editing=!editing;editPan=0;editActive=-1;editPanel();e.preventDefault();return;}
   if(EDITOR&&editing){
@@ -1896,7 +1924,7 @@ let attempts=1;
 // three second wait on every attempt would cost far more than the surprise it saves.
 // A full count is for arriving somewhere new -- next track, track select, first ride.
 const CD_BEAT=Math.round(52/T), CD_GO=Math.round(34/T);
-function reset(keepTry,quick){rec=[];build();if(!keepTry)attempts=1;P.best=0;P.crashes=0;P.time=0;P.won=0;P.prevBest=null;P.bails=0;
+function reset(keepTry,quick){rec=[];P.practice=false;build();if(!keepTry)attempts=1;P.best=0;P.crashes=0;P.time=0;P.won=0;P.prevBest=null;P.bails=0;
   P.cd=(quick?1:3)*CD_BEAT; P.go=0; P.cdFull=!quick;
   P.spawn={x:40,y:gAt(40)-R};respawn();cam.x=P.x-W/2;cam.y=P.y-H/2;}
 function respawn(){
@@ -2303,7 +2331,8 @@ function step(){
     P.won=P.time;
     // stash the old best FIRST -- read it after the overwrite and every PB shows 0.00
     P.prevBest=bestT[levelIdx];
-    if(bestT[levelIdx]===null||P.won<bestT[levelIdx]){
+    if(SIM||P.practice){}
+    else if(bestT[levelIdx]===null||P.won<bestT[levelIdx]){
       bestT[levelIdx]=P.won; ghost[levelIdx]=rec.slice();   // new best -> new ghost
       saveBest(); saveGhosts();
     }else if(!ghost[levelIdx]){
@@ -3408,7 +3437,7 @@ function draw(){
   P.smY+=(P.y-P.smY)*(P.ground?0.45:1);
   // the ghost of your best run, replayed frame-for-frame
   const gh=ghost[levelIdx];
-  if(gh&&started){
+  if(gh&&started&&!P.practice){
     const fr=Math.min(Math.floor(P.time),(gh.length/3|0)-1);
     if(fr>=0){
       const gx=gh[fr*3], gy=gh[fr*3+1], gr=gh[fr*3+2];
@@ -3448,7 +3477,7 @@ function draw(){
   // the ROAD AHEAD panel, all on top of the selection screen. None of it means anything
   // before you start.
   if(!started)startScreen();
-  else hud();
+  else if(!building)hud();
   drawSongToast();
 }
 
@@ -3878,7 +3907,7 @@ function hud(){
   t(LEVELS[levelIdx].n,20,92,'#5f7a66');
   // how far ahead of or behind the ghost you are, right now
   const gh2=ghost[levelIdx];
-  if(gh2&&started&&!P.won){
+  if(gh2&&started&&!P.won&&!P.practice){
     const fr=Math.min(Math.floor(P.time),(gh2.length/3|0)-1);
     if(fr>=0){
       const d=P.x-gh2[fr*3];
@@ -4147,6 +4176,8 @@ function dbg(){
   for(const wn of warn){ctx.fillStyle='#ff6b6b';ctx.fillText('!! '+wn,14,y);y+=11;}
 }
 function loopBody(now){
+  if(building){builderFrame();requestAnimationFrame(loop);return;}
+  if(P.practice&&P.won){openBuilder();requestAnimationFrame(loop);return;}
   if(EDITOR&&editing){
     // physics is frozen -- the pod stays put so you can work on a section in peace
     if(editCamX===null)editCamX=cam.x;
@@ -4176,6 +4207,611 @@ function loopBody(now){
    drawMs+=(dt-drawMs)*0.1; if(dt>worstMs)worstMs=dt;}
   crashPhase='dbg';dbg();
   crashPhase='idle';requestAnimationFrame(loop);}
+const TUNE_GET={BAR_H:()=>BAR_H,BJ_GAP:()=>BJ_GAP,BJ_LIP:()=>BJ_LIP,BJ_RAMP:()=>BJ_RAMP,CASTLE_GAP:()=>CASTLE_GAP,CASTLE_H:()=>CASTLE_H,CS_N:()=>CS_N,CS_RISE:()=>CS_RISE,CS_RUN:()=>CS_RUN,DECK_GAP:()=>DECK_GAP,DS_GAP1:()=>DS_GAP1,DS_GAP2:()=>DS_GAP2,DS_LIP:()=>DS_LIP,DS_MOUND:()=>DS_MOUND,FB_BAR_H:()=>FB_BAR_H,FB_DECK:()=>FB_DECK,FB_GAP:()=>FB_GAP,FB_LIP:()=>FB_LIP,GS_GAP:()=>GS_GAP,GS_GAP2:()=>GS_GAP2,GS_LIP:()=>GS_LIP,GS_RISE:()=>GS_RISE,GS_TIERS:()=>GS_TIERS,KS_LAND:()=>KS_LAND,KS_N1:()=>KS_N1,KS_N2:()=>KS_N2,LEDGE_RUN:()=>LEDGE_RUN,RAIL_OUT:()=>RAIL_OUT,RK_COUNT:()=>RK_COUNT,RK_GAP:()=>RK_GAP,RK_LIP:()=>RK_LIP,RT_GAP:()=>RT_GAP,RT_LIP:()=>RT_LIP,RT_SHELFW:()=>RT_SHELFW,SP_DECK:()=>SP_DECK,SP_GAP:()=>SP_GAP,SP_LIP:()=>SP_LIP,SP_RAMP:()=>SP_RAMP,STAGE_GAP:()=>STAGE_GAP,SW_COUNT:()=>SW_COUNT,SW_GAP:()=>SW_GAP,SW_H:()=>SW_H,SW_LINK:()=>SW_LINK,TENT_H:()=>TENT_H,TG_GAP:()=>TG_GAP,TG_LIP:()=>TG_LIP};
+const TUNE_SET={BAR_H:v=>{BAR_H=v;},BJ_GAP:v=>{BJ_GAP=v;},BJ_LIP:v=>{BJ_LIP=v;},BJ_RAMP:v=>{BJ_RAMP=v;},CASTLE_GAP:v=>{CASTLE_GAP=v;},CASTLE_H:v=>{CASTLE_H=v;},CS_N:v=>{CS_N=v;},CS_RISE:v=>{CS_RISE=v;},CS_RUN:v=>{CS_RUN=v;},DECK_GAP:v=>{DECK_GAP=v;},DS_GAP1:v=>{DS_GAP1=v;},DS_GAP2:v=>{DS_GAP2=v;},DS_LIP:v=>{DS_LIP=v;},DS_MOUND:v=>{DS_MOUND=v;},FB_BAR_H:v=>{FB_BAR_H=v;},FB_DECK:v=>{FB_DECK=v;},FB_GAP:v=>{FB_GAP=v;},FB_LIP:v=>{FB_LIP=v;},GS_GAP:v=>{GS_GAP=v;},GS_GAP2:v=>{GS_GAP2=v;},GS_LIP:v=>{GS_LIP=v;},GS_RISE:v=>{GS_RISE=v;},GS_TIERS:v=>{GS_TIERS=v;},KS_LAND:v=>{KS_LAND=v;},KS_N1:v=>{KS_N1=v;},KS_N2:v=>{KS_N2=v;},LEDGE_RUN:v=>{LEDGE_RUN=v;},RAIL_OUT:v=>{RAIL_OUT=v;},RK_COUNT:v=>{RK_COUNT=v;},RK_GAP:v=>{RK_GAP=v;},RK_LIP:v=>{RK_LIP=v;},RT_GAP:v=>{RT_GAP=v;},RT_LIP:v=>{RT_LIP=v;},RT_SHELFW:v=>{RT_SHELFW=v;},SP_DECK:v=>{SP_DECK=v;},SP_GAP:v=>{SP_GAP=v;},SP_LIP:v=>{SP_LIP=v;},SP_RAMP:v=>{SP_RAMP=v;},STAGE_GAP:v=>{STAGE_GAP=v;},SW_COUNT:v=>{SW_COUNT=v;},SW_GAP:v=>{SW_GAP=v;},SW_H:v=>{SW_H=v;},SW_LINK:v=>{SW_LINK=v;},TENT_H:v=>{TENT_H=v;},TG_GAP:v=>{TG_GAP=v;},TG_LIP:v=>{TG_LIP=v;}};
+/* ---------- TRACK BUILDER (B) ----------
+   A track is its `seq` string: one letter per piece, built left to right, each piece
+   starting where the last one ended. The builder edits that string and a per-piece
+   `tune` object ({pieceIndex:{knob:value}}) instead of the tuning constants, so one
+   jump can change without touching every other copy of it. */
+const N=(id,label,def,min,max,step,c)=>({id,label,def,min,max,step,c});
+const K=(c,label,min,max,step)=>N(c,label,TUNE_GET[c](),min,max,step,c);
+const hillPs=k=>{const p=HILLS[k].p;return [
+  N('gUp','Climb steepness',p[0],0.1,0.8,0.01),N('climb','Climb length',p[1],60,600,10),
+  N('Wt','Top width',p[2],80,800,10),N('gDn','Drop steepness',p[3],0.1,0.8,0.01),
+  N('desc','Downhill length',p[4],200,2600,20)];};
+const hillArgs=(k,v)=>{const p=HILLS[k].p.slice();
+  p[0]=v.gUp;p[1]=v.climb;p[2]=v.Wt;p[3]=v.gDn;p[4]=v.desc;return p;};
+const whoopPs=(n,L,H)=>[N('n','Bumps',n,1,24,1),N('L','Bump spacing',L,60,500,5),N('H','Bump height',H,4,90,1)];
+const PIECES={
+  s:{name:'Small hill',g:'Hills & jumps',ps:hillPs('s'),mk:(x,v)=>giantHill(x,...hillArgs('s',v))},
+  m:{name:'Medium hill',g:'Hills & jumps',ps:hillPs('m'),mk:(x,v)=>giantHill(x,...hillArgs('m',v))},
+  l:{name:'Big hill',g:'Hills & jumps',ps:hillPs('l'),mk:(x,v)=>giantHill(x,...hillArgs('l',v))},
+  p:{name:'Steep launcher',g:'Hills & jumps',ps:hillPs('p'),mk:(x,v)=>giantHill(x,...hillArgs('p',v))},
+  j:{name:'Dirt jump',g:'Hills & jumps',ps:[N('H','Jump size',1.15,0.3,2.2,0.01),N('gap','Gap width',1,0.2,2.5,0.01)],mk:(x,v)=>dirtJump(x,v.H,v.gap)},
+  k:{name:'Small dirt jump',g:'Hills & jumps',ps:[N('H','Jump size',0.62,0.3,2.2,0.01),N('gap','Gap width',1,0.2,2.5,0.01)],mk:(x,v)=>dirtJump(x,v.H,v.gap)},
+  P:{name:'Pop gap',g:'Hills & jumps',ps:[N('gap','Gap length',POP_GAP,100,1400,10)],mk:(x,v)=>popGap(x,v.gap)},
+  d:{name:'M-hill',g:'Hills & jumps',ps:[],mk:x=>mHill(x)},
+  u:{name:'Step-up',g:'Hills & jumps',ps:[],mk:x=>stepUp(x)},
+  O:{name:'Loop',g:'Hills & jumps',ps:[N('r','Loop size',LOOP_R,60,200,1)],mk:(x,v)=>vertLoop(x,v.r)},
+  X:{name:'Descent drops',g:'Hills & jumps',ps:[N('n','Drops',4,1,8,1),N('gap','Gap length',DESC_GAP,100,900,10)],mk:(x,v)=>descent(x,v.n,v.gap)},
+  v:{name:'Ledge drop',g:'Hills & jumps',ps:[N('drop','Drop length',LEDGE_DROP,200,2200,10),K('LEDGE_RUN','Run-up length',200,2000,10)],mk:(x,v)=>ledge(x,v.drop)},
+  R:{name:'Rhythm section',g:'Hills & jumps',ps:[N('g1','Gap 1',560,150,1200,10),N('g2','Gap 2',580,150,1200,10),N('g3','Gap 3',400,150,1200,10),N('climb','Climb steepness',0.26,0,0.6,0.01)],mk:(x,v)=>rhythm(x,[v.g1,v.g2,v.g3],v.climb)},
+  W:{name:'Whoops',g:'Bumps',ps:whoopPs(WHOOP_N,WHOOP_L,WHOOP_H),mk:(x,v)=>whoops(x,v.n,v.L,v.H)},
+  L:{name:'Long whoops',g:'Bumps',ps:whoopPs(LONG_N,WHOOP_L,WHOOP_H),mk:(x,v)=>whoops(x,v.n,v.L,v.H)},
+  H:{name:'Big humps',g:'Bumps',ps:whoopPs(3,HUMP_L,HUMP_H),mk:(x,v)=>whoops(x,v.n,v.L,v.H)},
+  A:{name:'Uphill whoops',g:'Bumps',ps:[...whoopPs(UPW_N,UPW_L,UPW_H),N('tilt','Slope (minus = uphill)',UPW_TILT,-0.5,0.3,0.01)],mk:(x,v)=>whoops(x,v.n,v.L,v.H,v.tilt)},
+  D:{name:'Sand dune',g:'Beach',ps:[N('H','Dune size',1,0.4,2.2,0.01)],mk:(x,v)=>dune(x,v.H)},
+  w:{name:'Water gap',g:'Beach',ps:[N('H','Jump size',1,0.4,2.2,0.01)],mk:(x,v)=>waterGap(x,v.H)},
+  B:{name:'Boat gap',g:'Beach',ps:[N('gap','Gap length',BOAT_GAP,150,1400,10)],mk:(x,v)=>boatGap(x,v.gap)},
+  b:{name:'Sandcastle',g:'Beach',ps:[K('CASTLE_GAP','Kicker to castle',150,900,10),K('CASTLE_H','Castle height',30,200,1)],mk:x=>ballCastle(x)},
+  S:{name:'Stair set',g:'Street',ps:[N('steps','Steps',9,2,24,1),N('run','Step depth',52,30,120,1),N('rise','Step height',30,8,70,1)],mk:(x,v)=>stairSet(x,v.steps,v.run,v.rise)},
+  E:{name:'City stairs',g:'Street',ps:[K('CS_N','Steps',2,30,1),K('CS_RUN','Step depth',30,120,1),K('CS_RISE','Step height',8,70,1)],mk:x=>cityStairs(x)},
+  K:{name:'Kinked stairs',g:'Street',ps:[K('KS_N1','Top steps',2,20,1),K('KS_N2','Bottom steps',2,20,1),K('KS_LAND','Middle landing',60,600,10)],mk:x=>kinkStairs(x)},
+  g:{name:'Rail jump',g:'Street',ps:[K('RAIL_OUT','Bar to far bank',150,1000,10)],mk:x=>railJump(x)},
+  U:{name:'Bus jump',g:'Street',ps:[K('BJ_GAP','Gap length',400,1600,10),K('BJ_LIP','Kicker steepness',0.3,1.3,0.01),K('BJ_RAMP','Kicker length',100,500,10)],mk:x=>busJump(x)},
+  z:{name:'Bike racks',g:'Street',ps:[K('RK_GAP','Gap length',300,1400,10),K('RK_LIP','Kicker steepness',0.3,1.2,0.01),K('RK_COUNT','Racks',2,14,1)],mk:x=>rackFeature(x)},
+  N:{name:'Step-up pair (flow)',g:'Street',ps:[K('SP_GAP','Gap length',200,1200,10),K('SP_LIP','Kicker steepness',0.3,1.2,0.01),K('SP_RAMP','Kicker length',100,500,10),K('SP_DECK','Deck length',200,1600,10)],mk:x=>stepPair(x,true)},
+  n:{name:'Step-up pair',g:'Street',ps:[K('SP_GAP','Gap length',200,1200,10),K('SP_LIP','Kicker steepness',0.3,1.2,0.01),K('SP_RAMP','Kicker length',100,500,10),K('SP_DECK','Deck length',200,1600,10)],mk:x=>stepPair(x)},
+  '2':{name:'Double + single',g:'Street',ps:[K('DS_GAP1','First gap',150,1200,10),K('DS_GAP2','Second gap',150,1200,10),K('DS_LIP','Kicker steepness',0.3,1.2,0.01),K('DS_MOUND','Middle mound',40,400,5)],mk:x=>doubleSingle(x)},
+  G:{name:'Grandstand',g:'Street',ps:[K('GS_GAP','First gap',150,1200,10),K('GS_GAP2','Second gap',150,1200,10),K('GS_TIERS','Tiers',1,8,1),K('GS_RISE','Tier height',10,120,1),K('GS_LIP','Kicker steepness',0.3,1.2,0.01)],mk:x=>grandstand(x)},
+  F:{name:'Flat bar',g:'Street',ps:[K('FB_GAP','Gap length',150,1200,10),K('FB_LIP','Kicker steepness',0.3,1.3,0.01),K('FB_DECK','Deck length',300,2200,10),K('FB_BAR_H','Bar height',10,120,1)],mk:x=>flatbar(x)},
+  y:{name:'Rollers + shelf',g:'Street',ps:[K('RT_GAP','Gap length',150,1200,10),K('RT_LIP','Kicker steepness',0.3,1.2,0.01),K('RT_SHELFW','Shelf length',150,1200,10)],mk:x=>rhythmTwo(x)},
+  c:{name:'Barricade',g:'Street',ps:[N('len','Length',BAR_LEN,300,2400,10),K('BAR_H','Height',40,240,1)],mk:(x,v)=>barricade(x,v.len)},
+  C:{name:'Long barricade',g:'Street',ps:[N('len','Length',Math.round(BAR_LEN*1.7),300,2400,10),K('BAR_H','Height',40,240,1)],mk:(x,v)=>barricade(x,v.len)},
+  J:{name:'Tube slide',g:'Park',ps:[],mk:x=>tubeFeature(x)},
+  Q:{name:'Swings',g:'Park',ps:[K('SW_GAP','Gap to first swing',300,1200,10),K('SW_COUNT','Swing sets',1,6,1),K('SW_LINK','Swing spacing',250,900,10),K('SW_H','Kicker height',40,180,1)],mk:x=>swingFeature(x)},
+  t:{name:'Tent gap',g:'Park',ps:[K('TG_GAP','Gap length',400,1800,10),K('TG_LIP','Kicker steepness',0.3,1.3,0.01),K('TENT_H','Tent height',40,240,1)],mk:x=>tentGap(x)},
+  T:{name:'Turntables',g:'Party',ps:[N('n','Decks',DECK_N,1,5,1),K('DECK_GAP','Gap between decks',150,1000,10),K('STAGE_GAP','Gap to stage',150,900,10)],mk:(x,v)=>turntable(x,v.n)}
+};
+const defSpace=k=>k==='j'||k==='k'?95:(k==='d'||k==='u'||k==='w'||k==='g')?90:80;
+function pieceVals(k,tu){
+  const v={};
+  for(const p of PIECES[k].ps)v[p.id]=(tu&&tu[p.id]!==undefined)?tu[p.id]:p.def;
+  v.space=(tu&&tu.space!==undefined)?tu.space:defSpace(k);
+  return v;
+}
+// Build one piece. Knobs that stand for a tuning constant are swapped in for just this
+// piece and put straight back, so the other copies of it keep the stock numbers.
+function makePiece(k,x,tu){
+  const D=PIECES[k]; if(!D)return null;
+  const v=pieceVals(k,tu);
+  for(const p of D.ps)if(p.c)TUNE_SET[p.c](v[p.id]);
+  try{return D.mk(x,v);}
+  finally{for(const p of D.ps)if(p.c)TUNE_SET[p.c](p.def);}
+}
+const pieceSpans=[];      // filled by build(): where each piece of the track landed
+
+function levelSig(L){
+  const s=L.seq+'|'+JSON.stringify(L.tune||{})+'|'+L.len; let h=5381;
+  for(let i=0;i<s.length;i++)h=(h*33+s.charCodeAt(i))|0;
+  return (h>>>0).toString(36);
+}
+const fileLevel=i=>i<LEVELS_FILE.length?JSON.parse(LEVELS_FILE[i]):null;
+const sameAsFile=(L,i)=>{const F=fileLevel(i);
+  return !!F&&!L.custom&&F.seq===L.seq&&JSON.stringify(F.tune||{})===JSON.stringify(L.tune||{})&&F.th===L.th&&!!F.flat===!!L.flat;};
+function saveBuilder(){try{
+  const sv={edits:{},custom:[]};
+  LEVELS.forEach((L,i)=>{
+    if(L.custom){const o=Object.assign({},L);delete o.custom;delete o.edited;sv.custom.push(o);}
+    else if(L.edited)sv.edits[L.n]={seq:L.seq,tune:L.tune,len:L.len,th:L.th,flat:!!L.flat};
+  });
+  localStorage.setItem(BUILDKEY,JSON.stringify(sv)); bSaved=Date.now();
+}catch(e){bSaved=-1;}}
+
+/* ----- the gas-held preview -----
+   Rides the current track with full throttle and nothing else, on the real physics,
+   and records the line. That is the prediction the old prompt-and-retry loop lacked:
+   you see where a jump puts you before you ride it. */
+let SIM=false, bSim=null, bSimTimer=0;
+const SIM_MAX=60*180, RIDE_LEAD=420;
+function simGas(){
+  const P0=Object.assign({},P), cam0={x:cam.x,y:cam.y}, key0=Object.assign({},key),
+        st0=started, rec0=rec, fx0=fx.slice(), du0=dust.slice(), att0=attempts;
+  const out={pts:[],bails:[],snaps:[],t:0,won:false,endX:0};
+  SIM=true;
+  try{
+    build();
+    for(const k in key)key[k]=false; key.gas=true; started=true; rec=[];
+    P.spawn={x:40,y:gAt(40)-R}; respawn();
+    P.time=0;P.won=0;P.cd=0;P.go=0;P.bails=0;P.best=0;P.crashes=0;P.practice=false;P.smY=P.y;
+    cam.x=P.x-W/2;cam.y=P.y-H/2;
+    const tg=pieceSpans.map(s=>Math.max(60,s.a-RIDE_LEAD));
+    let ti=0, wasBail=false;
+    for(let f=0;f<SIM_MAX;f++){
+      step();
+      const air=!(P.ground||P.rail||P.ramp||P.loop||P.tube);
+      out.pts.push(P.x,P.y,air?1:0);
+      if(P.bail>0&&!wasBail)out.bails.push(P.x,P.y);
+      wasBail=P.bail>0;
+      // a drop-in point for "ride from here": the first calm, grounded frame past it
+      while(ti<tg.length&&P.x>=tg[ti]&&P.ground&&!P.rail&&!P.ramp&&!P.loop&&!P.tube&&!(P.bail>0)){
+        out.snaps[ti]=Object.assign({},P);ti++;
+      }
+      if(P.won){out.won=true;break;}
+    }
+    out.t=P.time/60; out.endX=P.x;
+  }finally{
+    SIM=false;
+    build();
+    for(const k of Object.keys(P))delete P[k]; Object.assign(P,P0);
+    cam.x=cam0.x;cam.y=cam0.y;
+    for(const k in key)delete key[k]; Object.assign(key,key0);
+    started=st0;rec=rec0;attempts=att0;
+    fx.length=0;fx.push(...fx0);dust.length=0;dust.push(...du0);
+  }
+  return out;
+}
+
+/* ----- state ----- */
+let bSel=0, bCamX=0, bCamDY=0, bFast=false, bHeld={l:false,r:false,u:false,d:false};
+let bUndo=[], bRedo=[], bRideIdx=-1, bDrag=null, bSaved=0;
+const bLv=()=>LEVELS[levelIdx];
+const THEME_NAMES={forest:'Forest (The Quarry)',beach:'Beach (Baja Beach)',parade:'City street (Main Street)',orbit:'Sandlot (The Sandlot)',
+  jungle:'Jungle (no picture yet)',club:'Night club (no picture yet)',sunset:'Sunset forest'};
+const bLocked=(L=bLv())=>!L.custom&&!L.mine;
+const tuneArr=L=>{const a=[];for(let i=0;i<L.seq.length;i++)
+  a.push(L.tune&&L.tune[i]?Object.assign({},L.tune[i]):null);return a;};
+function setSeq(L,seq,ta){
+  L.seq=seq.join('');const t={};
+  ta.forEach((o,i)=>{if(o&&Object.keys(o).length)t[i]=o;});
+  if(Object.keys(t).length)L.tune=t;else delete L.tune;
+}
+const bState=()=>JSON.stringify({seq:bLv().seq,tune:bLv().tune||null,len:bLv().len,th:bLv().th,flat:!!bLv().flat});
+function bCommit(before){bUndo.push({lvl:levelIdx,s:before});if(bUndo.length>200)bUndo.shift();bRedo.length=0;}
+function bUndoLast(redo){
+  const from=redo?bRedo:bUndo, to=redo?bUndo:bRedo, u=from.pop(); if(!u)return;
+  if(u.lvl!==levelIdx){loadLevel(u.lvl);}
+  to.push({lvl:u.lvl,s:bState()});
+  const s=JSON.parse(u.s), L=bLv();
+  L.seq=s.seq;L.len=s.len;if(s.th)L.th=s.th;L.flat=!!s.flat;if(s.tune)L.tune=s.tune;else delete L.tune;
+  bApply();bPanel();
+}
+
+// After any change: mark the track edited (unless it is back to how the file ships it),
+// size its length to fit, rebuild, save, and re-run the preview.
+function bApply(){
+  const L=bLv(), i=levelIdx;
+  if(L.custom)L.edited=true;
+  else if(sameAsFile(L,i)){L.edited=false;L.len=fileLevel(i).len;}
+  else L.edited=true;
+  if(L.edited){
+    loadLevel(i); LEN=MAXW-200; build();
+    const last=pieceSpans[pieceSpans.length-1];
+    const need=last?Math.max(last.a+5401,FINISH+200):8000;
+    const F=fileLevel(i);   // a stock track only ever grows, so its checkpoints stay put
+    L.len=Math.min(MAXW-200,Math.max(F&&!L.custom?F.len:(L.len0||0),Math.ceil(need/100)*100));
+  }
+  bestT[i]=null;ghost[i]=null;loadBest();loadGhosts();
+  loadLevel(i);build();buildDecor();saveBuilder();
+  bSim=null;clearTimeout(bSimTimer);
+  bSimTimer=setTimeout(()=>{bSim=simGas();bStats();bMini();},120);
+  bMini();
+}
+function bFocus(i){
+  const s=pieceSpans[i]; if(!s)return;
+  const w=s.b-s.a;
+  bCamX=w<W-120?s.a+w/2-W/2:s.a-100; bCamDY=0;
+}
+
+/* ----- open / close / ride ----- */
+function openBuilder(){
+  building=true; bRideIdx=-1;
+  for(const k in key)key[k]=false;
+  started=true;titleUp=false;P.cd=0;P.go=0;P.won=0;P.practice=false;
+  loadLevel(levelIdx);
+  bSel=Math.min(bSel,Math.max(0,bLv().seq.length-1));
+  bPanel();fit();bApply();bFocus(bSel);
+}
+function closeBuilder(){
+  building=false;
+  const el=document.getElementById('builder'); if(el)el.remove();
+  bModalClose(); fit();
+  loadLevel(levelIdx); reset(); buildDecor();
+}
+// Drop in just before a piece, at the speed a gas-held run carries there. Practice runs
+// never touch best times or ghosts; finishing (or B) goes straight back to the builder.
+function rideFrom(i){
+  if(!bSim)bSim=simGas();
+  const s=bSim.snaps[i];
+  if(building){building=false;const el=document.getElementById('builder');if(el)el.remove();fit();}
+  started=true;titleUp=false;
+  reset(false,true);
+  if(s){
+    Object.assign(P,s);
+    P.time=0;P.won=0;P.cd=CD_BEAT;P.go=0;P.bails=0;P.smY=s.y;
+    P.rail=null;P.ramp=null;P.loop=null;P.tube=null;
+    P.spawn={x:s.x,y:s.y};
+    for(const c of checks)if(c.x<s.x)c.hit=true;
+  }
+  P.practice=true; bRideIdx=i;
+  cam.x=P.x-W*0.36; cam.y=P.y-H/2;
+  for(const k in key)key[k]=false;
+  note(s?'PRACTICE \u2014 B: back to builder':'PRACTICE FROM THE START','#ffd23f');
+}
+
+/* ----- keys and mouse ----- */
+function builderKey(e){
+  const tag=e.target&&e.target.tagName;
+  const typing=tag==='INPUT'&&e.target.type!=='range'||tag==='TEXTAREA'||tag==='SELECT';
+  if(!building){
+    if(e.code==='KeyB'&&!typing){openBuilder();e.preventDefault();return true;}
+    if(P.practice&&e.code==='Escape'){openBuilder();e.preventDefault();return true;}
+    if(P.practice&&e.code==='KeyR'){rideFrom(bRideIdx);e.preventDefault();return true;}
+    return false;
+  }
+  if(typing){if(e.code==='Escape')e.target.blur();return true;}
+  if(e.code==='KeyB'||e.code==='Escape'){
+    if(document.getElementById('bModal'))bModalClose();else closeBuilder();
+    e.preventDefault();return true;}
+  if((e.ctrlKey||e.metaKey)&&(e.code==='KeyY'||(e.code==='KeyZ'&&e.shiftKey))){bUndoLast(true);e.preventDefault();return true;}
+  if((e.ctrlKey||e.metaKey)&&e.code==='KeyZ'){bUndoLast();e.preventDefault();return true;}
+  bFast=e.shiftKey;
+  if(e.code==='ArrowLeft'||e.code==='KeyA')bHeld.l=true;
+  else if(e.code==='ArrowRight'||e.code==='KeyD')bHeld.r=true;
+  else if(e.code==='ArrowUp'||e.code==='KeyW')bHeld.u=true;
+  else if(e.code==='ArrowDown'||e.code==='KeyS')bHeld.d=true;
+  else if(e.code==='BracketRight'||e.code==='Period'){bSelect(bSel+1);}
+  else if(e.code==='BracketLeft'||e.code==='Comma'){bSelect(bSel-1);}
+  else if(e.code==='Enter'){rideFrom(bSel);}
+  else if(e.code==='KeyM'){toggleMusic();}
+  else return true;
+  e.preventDefault();return true;
+}
+addEventListener('keyup',e=>{
+  if(e.code==='ArrowLeft'||e.code==='KeyA')bHeld.l=false;
+  if(e.code==='ArrowRight'||e.code==='KeyD')bHeld.r=false;
+  if(e.code==='ArrowUp'||e.code==='KeyW')bHeld.u=false;
+  if(e.code==='ArrowDown'||e.code==='KeyS')bHeld.d=false;
+  if(!e.shiftKey)bFast=false;
+});
+const cvX=e=>{const r=cv.getBoundingClientRect();return (e.clientX-r.left)*(W/r.width);};
+cv.addEventListener('mousedown',e=>{if(!building)return;bDrag={x0:e.clientX,cam0:bCamX,mx:cvX(e),moved:false};});
+addEventListener('mousemove',e=>{
+  if(!building||!bDrag)return;
+  const r=cv.getBoundingClientRect(), dx=(e.clientX-bDrag.x0)*(W/r.width);
+  if(Math.abs(dx)>4)bDrag.moved=true;
+  if(bDrag.moved)bCamX=bDrag.cam0-dx;
+});
+addEventListener('mouseup',()=>{
+  if(!building||!bDrag)return;
+  if(!bDrag.moved){
+    const wx=bCamX+bDrag.mx, i=pieceSpans.findIndex(s=>wx>=s.a&&wx<s.b);
+    if(i>=0){bSel=i;bPanel();}
+  }
+  bDrag=null;
+});
+cv.addEventListener('wheel',e=>{if(!building)return;bCamX+=(e.deltaY+e.deltaX)*1.5;e.preventDefault();},{passive:false});
+
+function builderFrame(){
+  const sp=bFast?40:14;
+  if(bHeld.l)bCamX-=sp; if(bHeld.r)bCamX+=sp;
+  if(bHeld.u)bCamDY-=sp; if(bHeld.d)bCamDY+=sp;
+  bCamX=Math.max(-300,Math.min(LEN-W+300,bCamX));
+  cam.x=bCamX; cam.y=gAt(bCamX+W/2)-H*0.55+bCamDY;
+  draw(); drawBuilder();
+}
+
+/* ----- on-canvas overlay ----- */
+function drawBuilder(){
+  const CX=Math.round(cam.x),CY=Math.round(cam.y);
+  ctx.save();
+  ctx.font='bold 10px Verdana,sans-serif';ctx.textBaseline='top';
+  pieceSpans.forEach((s,i)=>{
+    const a=s.a-CX,b=s.b-CX; if(b<-10||a>W+10)return;
+    const sel=i===bSel;
+    if(sel){ctx.fillStyle='rgba(255,210,63,0.10)';ctx.fillRect(a,0,b-a,H);}
+    ctx.strokeStyle=sel?'rgba(255,210,63,0.9)':'rgba(255,255,255,0.35)';
+    ctx.setLineDash([6,5]);ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(a+0.5,22);ctx.lineTo(a+0.5,H);ctx.stroke();ctx.setLineDash([]);
+    const lbl=(i+1)+'  '+PIECES[s.k].name.toUpperCase()+(bLv().tune&&bLv().tune[s.i]?'  *':'');
+    const tw=ctx.measureText(lbl).width+10, lx=Math.max(a,Math.min(b-tw,4));
+    ctx.fillStyle=sel?'#ffd23f':'rgba(10,20,16,0.75)';ctx.fillRect(lx,24,tw,16);
+    ctx.fillStyle=sel?'#1a1405':'#e8f0d8';ctx.fillText(lbl,lx+5,27);
+  });
+  if(bSim){
+    const p=bSim.pts;
+    ctx.lineWidth=2.5;ctx.strokeStyle='#ffd23f';
+    ctx.beginPath();let on=false;
+    for(let k=0;k<p.length;k+=3){
+      const x=p[k]-CX,y=p[k+1]-CY;
+      if(p[k+2]&&x>-40&&x<W+40){if(!on)ctx.moveTo(x,y);else ctx.lineTo(x,y);on=true;}
+      else if(on){ctx.stroke();ctx.beginPath();on=false;}
+    }
+    if(on)ctx.stroke();
+    // a dot every half second, so you can read speed off the spacing
+    ctx.fillStyle='#fff6c8';
+    for(let k=0;k<p.length;k+=90){const x=p[k]-CX,y=p[k+1]-CY;
+      if(x>-5&&x<W+5){ctx.beginPath();ctx.arc(x,y,2.5,0,6.3);ctx.fill();}}
+    for(let k=0;k<bSim.bails.length;k+=2){
+      const x=bSim.bails[k]-CX,y=bSim.bails[k+1]-CY; if(x<-20||x>W+20)continue;
+      ctx.strokeStyle='#ff4d4d';ctx.lineWidth=3;
+      ctx.beginPath();ctx.moveTo(x-7,y-7);ctx.lineTo(x+7,y+7);ctx.moveTo(x+7,y-7);ctx.lineTo(x-7,y+7);ctx.stroke();
+      ctx.fillStyle='#ff4d4d';ctx.fillText('BAIL',x-12,y-22);
+    }
+  }
+  ctx.fillStyle='rgba(10,20,16,0.85)';ctx.fillRect(0,0,W,20);
+  ctx.fillStyle='#ffd23f';ctx.fillText('TRACK BUILDER',6,5);
+  ctx.fillStyle='#cfe0bb';
+  ctx.fillText(bSim?('yellow line = holding gas the whole way  \u00b7  '+
+    (bSim.won?'finishes in '+bSim.t.toFixed(2)+'s':'does NOT finish')+
+    (bSim.bails.length?'  \u00b7  '+bSim.bails.length+' bail'+(bSim.bails.length>1?'s':''):''))
+    :'working out the line\u2026',110,5);
+  ctx.restore();
+}
+
+/* ----- the side panel ----- */
+const BCSS=`#builder{position:fixed;top:0;right:0;bottom:0;width:${BUILDER_W}px;overflow-y:auto;
+ background:#0f1f18;border-left:3px solid #24422f;color:#cfe0bb;font:12px Verdana,sans-serif;padding:10px;z-index:20}
+#builder h2{font-size:14px;color:#ffd23f;margin:2px 0 8px;display:flex;justify-content:space-between}
+#builder .lock{background:#24301f;border:1px solid #4d6b3f;border-radius:4px;padding:6px 8px;margin:6px 0;line-height:1.5}
+#builder .lock button{margin-top:5px}
+#builder input[type=range]:disabled{opacity:.45}
+#builder h3{font-size:11px;color:#8fb59a;margin:12px 0 5px;text-transform:uppercase;letter-spacing:1px}
+#builder button,#bModal button{background:#24422f;color:#e8f0d8;border:1px solid #3a6b4b;border-radius:4px;padding:4px 8px;font:11px Verdana,sans-serif;cursor:pointer}
+#builder button:hover,#bModal button:hover{background:#2f5a3f}
+#builder button.go{background:#8a6d12;border-color:#ffd23f;color:#fff6c8}
+#builder select,#builder input[type=text]{background:#16301f;color:#e8f0d8;border:1px solid #3a6b4b;border-radius:4px;padding:3px;font:11px Verdana,sans-serif}
+#builder .row{display:flex;gap:5px;align-items:center;flex-wrap:wrap;margin:4px 0}
+#bList{max-height:190px;overflow-y:auto;border:1px solid #24422f;border-radius:4px}
+#bList div{padding:3px 6px;cursor:pointer;display:flex;justify-content:space-between}
+#bList div:nth-child(odd){background:#132a1f}
+#bList div.sel{background:#ffd23f;color:#1a1405}
+#bList div.cut{opacity:.45}
+.bK{margin:6px 0}.bK label{display:flex;justify-content:space-between}
+.bK input{width:100%}.bK .chg{color:#ffd23f}
+#bStats{background:#132a1f;border-radius:4px;padding:6px;margin-top:4px;line-height:1.5}
+#bStats .bad{color:#ff6b6b}#bStats .ok{color:#8fd07a}
+#builder canvas{display:block;width:100%;background:#0a1410;border-radius:4px;cursor:pointer;image-rendering:auto}
+#builder .tip{color:#6f8f78;font-size:10px;line-height:1.5;margin-top:10px}
+#bModal{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:30;display:flex;align-items:center;justify-content:center}
+#bModal>div{background:#0f1f18;border:3px solid #24422f;border-radius:6px;padding:14px;width:min(720px,94vw);color:#cfe0bb;font:12px Verdana,sans-serif}
+#bModal textarea{width:100%;height:220px;background:#0a1410;color:#e8f0d8;border:1px solid #3a6b4b;font:11px monospace;margin:8px 0}`;
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function bPanel(){
+  let el=document.getElementById('builder');
+  if(!el){
+    if(!document.getElementById('bCss')){const st=document.createElement('style');st.id='bCss';st.textContent=BCSS;document.head.appendChild(st);}
+    el=document.createElement('div');el.id='builder';document.body.appendChild(el);
+    el.addEventListener('click',bClick);el.addEventListener('input',bInput);el.addEventListener('change',bChange);
+  }
+  const L=bLv(), seq=L.seq.split(''), ta=tuneArr(L);
+  bSel=Math.max(0,Math.min(bSel,seq.length-1));
+  const groups={};for(const k in PIECES)(groups[PIECES[k].g]=groups[PIECES[k].g]||[]).push(k);
+  const opts=Object.keys(groups).map(g=>`<optgroup label="${g}">`+
+    groups[g].map(k=>`<option value="${esc(k)}">${PIECES[k].name}</option>`).join('')+'</optgroup>').join('');
+  const k=seq[bSel], D=k&&PIECES[k];
+  let knobs='';
+  if(D){
+    const v=pieceVals(k,ta[bSel]);
+    const all=[...D.ps,N('space','Space before next piece',defSpace(k),0,1500,10)];
+    knobs=all.map(p=>{const ch=ta[bSel]&&ta[bSel][p.id]!==undefined;
+      return `<div class="bK"><label><span class="${ch?'chg':''}">${p.label}</span><b class="${ch?'chg':''}" id="bv_${p.id}">${+v[p.id].toFixed(3)}</b></label>
+      <input type="range" data-knob="${p.id}" ${bLocked()?'disabled':''} min="${p.min}" max="${p.max}" step="${p.step}" value="${v[p.id]}"></div>`;}).join('')
+      ||'<div class="tip">This piece has no sliders yet.</div>';
+  }
+  const cutFrom=pieceSpans.length;
+  el.innerHTML=`<h2><span>TRACK BUILDER</span><button data-act="close" title="B or Esc">Close \u2715</button></h2>
+  <div class="row"><select data-act="level">${LEVELS.map((T,i)=>`<option value="${i}" ${i===levelIdx?'selected':''}>${esc(T.n)}${T.edited?' (edited)':''}</option>`).join('')}</select>
+   <button data-act="new">+ New track</button></div>
+  ${bLocked()?`<div class="lock"><b>Locked:</b> one of the original tracks: you can look and ride, not change it.
+   <button class="go" data-act="copytrack">Copy as my own track</button></div>`:''}
+  ${!bLocked()?`<div class="row">${L.custom?`Name <input type="text" data-act="name" value="${esc(L.n)}" style="width:150px">`:`<b>${esc(L.n)}</b>`}
+   Look <select data-act="theme">${Object.keys(THEMES).map(t=>`<option value="${t}" ${t===L.th?'selected':''}>${THEME_NAMES[t]||t}</option>`).join('')}</select>
+   <label><input type="checkbox" data-act="flat" ${L.flat?'checked':''}> flat</label></div>`:''}
+  <div id="bStats"></div>
+  <h3>Whole track (click to jump there)</h3><canvas id="bMini" width="640" height="110"></canvas>
+  <h3>Pieces</h3>
+  <div id="bList">${seq.map((c,i)=>`<div data-pick="${i}" class="${i===bSel?'sel':''} ${i>=cutFrom?'cut':''}"><span>${i+1}. ${PIECES[c]?PIECES[c].name:'? '+esc(c)}${ta[i]?' *':''}</span><span>${esc(c)}</span></div>`).join('')||'<div>(empty \u2014 add a piece)</div>'}</div>
+  ${bLocked()?'':`
+  <div class="row"><button data-act="up">\u25b2 Up</button><button data-act="down">\u25bc Down</button><button data-act="dup">Copy</button><button data-act="del">Delete</button></div>
+  <div class="row"><select data-act="addk">${opts}</select><button data-act="add">+ Add after</button></div>`}
+  ${cutFrom<seq.length?`<div class="tip" style="color:#ff6b6b">Pieces after #${cutFrom} don't fit: the track is at its maximum length.</div>`:''}
+  ${D?`<h3>#${bSel+1} ${D.name}</h3>
+  <canvas id="bSec" width="640" height="260"></canvas>
+  ${knobs}
+  <div class="row"><button class="go" data-act="ride">\u25b6 Ride from here (Enter)</button>${bLocked()?'':'<button data-act="rpiece">Reset piece</button>'}</div>`:''}
+  <h3>Track</h3>
+  <div class="row"><button data-act="undo">Undo (Ctrl+Z)</button><button data-act="redo">Redo (Ctrl+Y)</button>${bLocked()?'':`<button data-act="revert">${L.custom?'Delete track':'Revert to saved file'}</button>`}<button data-act="export">Export\u2026</button></div>
+  <div class="tip">Arrows / drag / scroll wheel: move the view &middot; [ ] next/previous piece &middot; click a piece on the track to pick it.<br>
+  Yellow line: where a rider holding gas the whole time goes. Dots are half a second apart. Red X: that rider bails.<br>
+  Changes save in this browser automatically. Export puts them into the game file.</div>`;
+  bStats();bMini();
+}
+function bStats(){
+  const el=document.getElementById('bStats'); if(!el)return;
+  const L=bLv();
+  if(!bSim){el.innerHTML='Working out the gas-held line\u2026';return;}
+  el.innerHTML=`Holding gas: ${bSim.won?`<span class="ok">finishes in ${bSim.t.toFixed(2)}s</span>`:`<span class="bad">does not finish</span>`}
+   ${bSim.bails.length?` &middot; <span class="bad">${bSim.bails.length} bail${bSim.bails.length>1?'s':''}</span>`:' &middot; no bails'}<br>
+   ${L.seq.length} pieces &middot; length ${L.len}${L.edited?' &middot; <span style="color:#ffd23f">edited</span>':''}<br>
+   ${bSaved<0?'<span class="bad">Could not save in this browser</span>':bSaved?`<span class="ok">\u2713 Saved ${new Date(bSaved).toLocaleTimeString()}</span>`:'Changes save automatically'}`;
+  bSec();
+}
+function bMini(){
+  const c=document.getElementById('bMini'); if(!c)return;
+  const g=c.getContext('2d'), w=c.width, h=c.height, x1=Math.max(1000,FINISH+300);
+  let lo=1e9,hi=-1e9; for(let x=0;x<x1;x+=20){lo=Math.min(lo,G[x]);hi=Math.max(hi,G[x]);}
+  const sx=w/x1, sy=(h-16)/Math.max(200,hi-lo+120), oy=8-(lo-100)*sy;
+  g.clearRect(0,0,w,h);
+  pieceSpans.forEach((s,i)=>{g.fillStyle=i===bSel?'rgba(255,210,63,0.30)':i%2?'rgba(255,255,255,0.04)':'rgba(255,255,255,0.09)';
+    g.fillRect(s.a*sx,0,(s.b-s.a)*sx,h);});
+  g.strokeStyle='#8fb59a';g.lineWidth=2;g.beginPath();
+  for(let x=0;x<x1;x+=10){const y=G[x]*sy+oy;x?g.lineTo(x*sx,y):g.moveTo(0,y);}g.stroke();
+  if(bSim){g.fillStyle='#ffd23f';const p=bSim.pts;
+    for(let k=0;k<p.length;k+=9)if(p[k+2])g.fillRect(p[k]*sx-1,p[k+1]*sy+oy-1,2,2);
+    g.fillStyle='#ff4d4d';for(let k=0;k<bSim.bails.length;k+=2)g.fillRect(bSim.bails[k]*sx-3,bSim.bails[k+1]*sy+oy-3,6,6);}
+  g.strokeStyle='#fff';g.lineWidth=1.5;g.strokeRect(cam.x*sx,1,W*sx,h-2);
+  g.fillStyle='#e8f0d8';g.fillRect(FINISH*sx,0,2,h);
+  c.onclick=e=>{const r=c.getBoundingClientRect(), wx=(e.clientX-r.left)/r.width*x1;
+    const i=pieceSpans.findIndex(s=>wx>=s.a&&wx<s.b); if(i>=0){bSel=i;bPanel();bFocus(i);} else bCamX=wx-W/2;};
+}
+// The selected piece on its own, true to scale, with the gas-held line through it.
+function bSec(){
+  const c=document.getElementById('bSec'), s=pieceSpans[bSel]; if(!c||!s)return;
+  const g=c.getContext('2d'), w=c.width, h=c.height, a=s.a-200, b=s.b+200;
+  let lo=1e9,hi=-1e9;
+  for(let x=Math.max(0,a);x<b;x+=5){lo=Math.min(lo,G[x]);hi=Math.max(hi,G[x]);}
+  const p=bSim?bSim.pts:[];
+  for(let k=0;k<p.length;k+=3)if(p[k]>a&&p[k]<b&&p[k+2])lo=Math.min(lo,p[k+1]);
+  const sc=Math.min(w/(b-a),(h-20)/Math.max(60,hi-lo+40)), ox=-a*sc, oy=h-10-hi*sc-((h-20)-(hi-lo)*sc)/2;
+  g.clearRect(0,0,w,h);
+  g.fillStyle='#24422f';g.beginPath();g.moveTo(0,h);
+  for(let x=a;x<=b;x+=2)g.lineTo(x*sc+ox,G[Math.max(0,Math.min(MAXW-1,x))]*sc+oy);
+  g.lineTo(w,h);g.closePath();g.fill();
+  g.strokeStyle='#8fb59a';g.lineWidth=2;g.stroke();
+  g.strokeStyle='rgba(255,210,63,0.6)';g.setLineDash([5,4]);g.lineWidth=1;
+  for(const x of [s.a,s.b]){g.beginPath();g.moveTo(x*sc+ox,0);g.lineTo(x*sc+ox,h);g.stroke();}
+  g.setLineDash([]);
+  if(bSim){
+    g.strokeStyle='#ffd23f';g.lineWidth=2.5;g.beginPath();let on=false;
+    for(let k=0;k<p.length;k+=3){const x=p[k];
+      if(x>a&&x<b){const X=x*sc+ox,Y=(p[k+1]+R)*sc+oy;
+        if(p[k+2]){on?g.lineTo(X,Y):g.moveTo(X,Y);on=true;}else if(on){g.stroke();g.beginPath();on=false;}}}
+    if(on)g.stroke();
+    g.fillStyle='#ff4d4d';
+    for(let k=0;k<bSim.bails.length;k+=2){const x=bSim.bails[k];
+      if(x>a&&x<b)g.fillRect(x*sc+ox-5,(bSim.bails[k+1]+R)*sc+oy-5,10,10);}
+  }
+  g.fillStyle='#cfe0bb';g.font='18px Verdana';g.fillText('start',s.a*sc+ox+4,20);g.fillText('end',s.b*sc+ox-36,20);
+}
+function bSelect(i){
+  const n=bLv().seq.length; if(!n)return;
+  bSel=(i+n)%n;bPanel();bFocus(bSel);
+}
+function bEdit(fn){const before=bState();fn();if(bState()!==before){bCommit(before);bApply();}bPanel();}
+function bClick(e){
+  const pick=e.target.closest('[data-pick]');
+  if(pick){bSel=+pick.dataset.pick;bPanel();bFocus(bSel);return;}
+  const b=e.target.closest('button'); if(!b)return;
+  const L=bLv(), seq=L.seq.split(''), ta=tuneArr(L), i=bSel, act=b.dataset.act;
+  if(bLocked()&&['up','down','dup','del','add','rpiece','revert'].includes(act))return;
+  if(act==='close')closeBuilder();
+  else if(act==='copytrack')bNewTrack(L);
+  else if(act==='up'&&i>0)bEdit(()=>{[seq[i-1],seq[i]]=[seq[i],seq[i-1]];[ta[i-1],ta[i]]=[ta[i],ta[i-1]];setSeq(L,seq,ta);bSel--;});
+  else if(act==='down'&&i<seq.length-1)bEdit(()=>{[seq[i+1],seq[i]]=[seq[i],seq[i+1]];[ta[i+1],ta[i]]=[ta[i],ta[i+1]];setSeq(L,seq,ta);bSel++;});
+  else if(act==='dup'&&seq.length)bEdit(()=>{seq.splice(i+1,0,seq[i]);ta.splice(i+1,0,ta[i]?Object.assign({},ta[i]):null);setSeq(L,seq,ta);bSel++;});
+  else if(act==='del'&&seq.length)bEdit(()=>{seq.splice(i,1);ta.splice(i,1);setSeq(L,seq,ta);bSel=Math.max(0,i-1);});
+  else if(act==='add'){const k=document.querySelector('#builder [data-act=addk]').value;
+    bEdit(()=>{const at=seq.length?i+1:0;seq.splice(at,0,k);ta.splice(at,0,null);setSeq(L,seq,ta);bSel=at;});bFocus(bSel);}
+  else if(act==='rpiece')bEdit(()=>{ta[i]=null;setSeq(L,seq,ta);});
+  else if(act==='ride')rideFrom(i);
+  else if(act==='undo')bUndoLast();
+  else if(act==='redo')bUndoLast(true);
+  else if(act==='new')bNewTrack();
+  else if(act==='revert')bRevert();
+  else if(act==='export')bExport();
+}
+let bKnobBefore=null;
+function bInput(e){
+  const id=e.target.dataset.knob; if(!id||bLocked())return;
+  const L=bLv(), seq=L.seq.split(''), ta=tuneArr(L), k=seq[bSel];
+  if(bKnobBefore===null)bKnobBefore=bState();
+  const val=+e.target.value, p=id==='space'?{def:defSpace(k)}:PIECES[k].ps.find(q=>q.id===id);
+  const o=ta[bSel]||{};
+  if(Math.abs(val-p.def)<1e-9)delete o[id];else o[id]=val;
+  ta[bSel]=Object.keys(o).length?o:null; setSeq(L,seq,ta);
+  const lab=document.getElementById('bv_'+id); if(lab)lab.textContent=+val.toFixed(3);
+  bApply();
+}
+function bChange(e){
+  const act=e.target.dataset.act, L=bLv();
+  if(e.target.dataset.knob){if(bKnobBefore!==null&&bKnobBefore!==bState())bCommit(bKnobBefore);bKnobBefore=null;bPanel();return;}
+  if(e.target.dataset.knob&&bLocked())return;
+  if(act==='level'){loadLevel(+e.target.value);bSel=0;bApply();bPanel();bFocus(0);}
+  else if(act==='name'){const nm=e.target.value.trim().toUpperCase();
+    if(nm&&!LEVELS.some(T=>T!==L&&T.n===nm)){PROPS[nm]=PROPS[L.n];L.n=nm;}bApply();bPanel();}
+  else if(act==='theme'){bEdit(()=>{L.th=e.target.value;});}
+  else if(act==='flat'){bEdit(()=>{L.flat=e.target.checked;});}
+}
+function bNewTrack(from){
+  let nm=(prompt('Name for the new track?',from?'MY '+from.n:'MY TRACK')||'').trim().toUpperCase(); if(!nm)return;
+  while(LEVELS.some(T=>T.n===nm))nm+=' 2';
+  const T={n:nm,seq:'kWj',len:20000,fg:1.6,th:bLv().th,flat:true,nofin:true,par:30,custom:true,edited:true};
+  if(from){for(const k of ['seq','len','fg','th','flat','par'])if(from[k]!==undefined)T[k]=from[k];
+    T.len0=from.len;T.from=from.from||from.n;   // same length as the original, so the copy rides the same
+    if(from.tune)T.tune=JSON.parse(JSON.stringify(from.tune));if(!from.flat)delete T.flat;}
+  LEVELS.push(T);
+  bestT.push(null);ghost.push(null);
+  loadLevel(LEVELS.length-1);bSel=0;bApply();bPanel();bFocus(0);
+}
+function bRevert(){
+  const L=bLv(), i=levelIdx;
+  if(L.custom){
+    if(!confirm('Delete the track "'+L.n+'"? This cannot be undone.'))return;
+    LEVELS.splice(i,1);bestT.splice(i,1);ghost.splice(i,1);loadLevel(0);
+  }else{
+    if(!confirm('Put "'+L.n+'" back the way the game file has it? (Undo can bring your version back.)'))return;
+    bCommit(bState());
+    const F=fileLevel(i);L.seq=F.seq;L.len=F.len;L.th=F.th;L.flat=F.flat;if(F.tune)L.tune=F.tune;else delete L.tune;
+  }
+  bSel=0;bApply();bPanel();bFocus(0);
+}
+
+/* ----- export: the level lines, ready to go into the game file ----- */
+function jsVal(v){
+  if(typeof v==='string')return "'"+v.replace(/\\/g,'\\\\').replace(/'/g,"\\'")+"'";
+  if(Array.isArray(v))return '['+v.map(jsVal).join(',')+']';
+  if(v&&typeof v==='object')return '{'+Object.keys(v).map(k=>(/^[A-Za-z_]\w*$|^\d+$/.test(k)?k:jsVal(k))+':'+jsVal(v[k])).join(', ')+'}';
+  return String(v);
+}
+function levelLine(L,i){
+  const F=fileLevel(i), o={};
+  for(const k of ['n','from','seq','len','len0','fg','th','flat','nofin','par','md','lay','tune'])if(L[k]!==undefined&&L[k]!==false)o[k]=L[k];
+  o.mine=true;
+  if(L.custom&&bSim&&levelIdx===i&&bSim.won)o.par=Math.round(bSim.t);
+  if(F&&!L.custom)o.lay=(F.lay||1)+1;        // a new layout: old best times don't carry over
+  if(L.custom)delete o.md;
+  return '  '+jsVal(o)+',   // made in the track builder';
+}
+function exportBlock(src){
+  const a=src.indexOf('const LEVELS=['); if(a<0)return null;
+  const b=src.indexOf('\n];',a); if(b<0)return null;
+  const done=new Set();
+  // untouched tracks keep their original line, comments and all
+  const out=src.slice(a,b).split('\n').map(line=>{
+    const m=line.match(/^\s*\{n:'([^']*)'/); if(!m)return line;
+    const i=LEVELS.findIndex(L=>L.n===m[1]); if(i<0)return line;
+    done.add(i); return LEVELS[i].edited?levelLine(LEVELS[i],i):line;
+  });
+  LEVELS.forEach((L,i)=>{if(!done.has(i)&&L.custom)out.push(levelLine(L,i));});
+  return src.slice(0,a)+out.join('\n')+src.slice(b);
+}
+function bModalClose(){const m=document.getElementById('bModal');if(m)m.remove();}
+function bExport(){
+  bModalClose();
+  const lines=LEVELS.map((L,i)=>L.edited?levelLine(L,i):null).filter(Boolean);
+  const m=document.createElement('div');m.id='bModal';
+  m.innerHTML=`<div><h2 style="color:#ffd23f;font-size:14px">Export tracks</h2>
+  ${lines.length?`<p>These are the tracks you changed or made. <b>Download game file</b> gives you
+  <code>isopod-rider.html</code> with them built in: upload it to the repo in place of the old one
+  (GitHub: Add file \u2192 Upload files). Or copy the lines below and paste them to Devin or Claude.</p>
+  <textarea readonly>${esc(lines.join('\n'))}</textarea>
+  <div class="row" style="display:flex;gap:6px"><button data-x="dl">Download game file</button><button data-x="copy">Copy lines</button><button data-x="close">Close</button></div>
+  <p id="bExMsg" style="color:#8fb59a;margin-top:6px"></p>`
+  :`<p>Nothing to export yet \u2014 every track is the same as in the game file.</p><button data-x="close">Close</button>`}</div>`;
+  document.body.appendChild(m);
+  m.addEventListener('click',async e=>{
+    const x=e.target.dataset&&e.target.dataset.x, msg=document.getElementById('bExMsg');
+    if(x==='close'||e.target===m)bModalClose();
+    if(x==='copy'){const t=m.querySelector('textarea');t.select();
+      try{await navigator.clipboard.writeText(t.value);}catch(err){document.execCommand('copy');}
+      if(msg)msg.textContent='Copied.';}
+    if(x==='dl'){
+      let src=null;
+      try{const r=await fetch(location.href.split('#')[0],{cache:'no-store'});if(r.ok)src=await r.text();}catch(err){}
+      if(!src){const d=document.documentElement.cloneNode(true);
+        for(const id of ['builder','bModal','bCss']){const n=d.querySelector('#'+id);if(n)n.remove();}
+        src='<!DOCTYPE html>\n'+d.outerHTML;}
+      const out=exportBlock(src);
+      if(!out){if(msg)msg.textContent='Could not find the track list in the file \u2014 use Copy lines instead.';return;}
+      const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([out],{type:'text/html'}));
+      a.download='isopod-rider.html';document.body.appendChild(a);a.click();a.remove();
+      if(msg)msg.textContent='Downloaded isopod-rider.html.';
+    }
+  });
+}
+
 if(PODS[podIdx].locked)podStep(1);
 loadBest();loadGhosts();loadLevel(0);reset();buildDecor();requestAnimationFrame(loop);
 })();
