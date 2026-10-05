@@ -1,36 +1,33 @@
 # ISOPOD RIDER
 
-A browser game. All the code is **one file: `isopod-rider.html`**; the sound effects live next to it in the `sfx/` folder (if you download the game to play offline, grab that folder too).
-This repo is the one true copy — no more sending the file back and forth.
+A browser downhill game. Four tracks: The Quarry, Baja Beach, Main Street and The Sandlot.
 
-## Play the latest version
+## Play
 https://isopodkeepers.github.io/Isopod-Rider/isopod-rider.html
 
-Controls: **UP** gas · **SPACE** load / brake · **LEFT / RIGHT** lean · **R** restart · **1-5** pick your pod
+Controls: **UP** gas · **SPACE** load / brake · **LEFT / RIGHT** lean · **R** restart · **M** music · **]** skip song
 
-## How we work on it together (no software to install)
+## What's in here
+| Path | What it is |
+| --- | --- |
+| `isopod-rider.html` | The whole game: code, levels, physics. This is the file you edit. |
+| `assets/` | Pictures: backgrounds and props (bus, tube, swings, bike rack, billboard). |
+| `music/` | The three songs on the playlist. |
+| `tools/bundle.py` | Packs everything back into one stand-alone HTML file for sharing. |
 
-### Editing the game
-1. Go to https://github.com/IsopodKeepers/Isopod-Rider
-2. Click **`isopod-rider.html`**
-3. Click the **pencil icon** (top right of the file, "Edit this file")
-4. Make your changes in the editor
-5. Click the green **Commit changes...** button
-6. Write one line saying what you changed (e.g. "made the water gap wider"), then **Commit changes** again
-7. Wait about a minute, then reload the play link to try it
+The pictures and music used to be packed inside the HTML, which made it 8.6 MB.
+Keeping them in folders makes the game file ~0.2 MB, small enough to open in the
+GitHub editor or hand to an AI assistant in one piece.
 
-### Testing before you commit
-Copy the whole file into a local `.html` file and double-click it — it runs offline. Once you're happy, paste it back into the GitHub editor and commit.
+## Playing offline / sharing
+- **Folder version:** on GitHub click **Code → Download ZIP**, unzip, double-click
+  `isopod-rider.html`. Keep `assets/` and `music/` next to it.
+- **One-file version:** run `python3 tools/bundle.py`. It writes
+  `isopod-rider-bundled.html`, which works on its own with nothing else.
 
-### Seeing what changed / undoing
-- Click **History** (top right of the file view) to see every version, who changed it, and when.
-- Click any entry to see exactly which lines changed (red = removed, green = added).
-- To go back to an older version: open it in History, click **`...` → View file**, copy it, and commit it over the current one.
+## Editing
+1. Open `isopod-rider.html` on GitHub and click the pencil icon.
+2. Make the change and click **Commit changes**, with a one-line note on what you changed.
+3. Wait about a minute, then reload the play link.
 
-### Rules of thumb
-- Commit small changes often, with a one-line note. It makes it easy to see who did what.
-- If you both edit at the same time, GitHub will warn the second person that the file changed — reload, redo your edit, commit again.
-- Nothing is ever lost. Every version is in History.
-
-## Getting access
-You need a free GitHub account and an invite to this repo (Settings → Collaborators, sent by the owner).
+Every version is kept in **History**, so nothing is ever lost.
