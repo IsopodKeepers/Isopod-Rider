@@ -29,6 +29,9 @@ GitHub editor or hand to an AI assistant in one piece.
 Every track is a row of pieces (bus jump, stairs, whoops...). The builder lets you change
 that row without touching code:
 
+- **The four original tracks are locked.** You can look at them and ride them, and
+  **Copy as my own track** makes an editable copy. Everything below is for your own tracks.
+
 - **Pieces list:** pick, reorder, copy, delete, or add any of the ~40 piece types.
 - **Sliders:** gap length, kicker steepness, step count and so on for the selected piece.
   They only change *that* piece; every other copy of it keeps the stock numbers.
@@ -36,7 +39,9 @@ that row without touching code:
   physics every time you move a slider. Dots are half a second apart; a red X is a bail.
 - **Ride from here (Enter):** drops you in just before the selected piece at the speed
   you'd carry there. Practice runs never count as best times. **B** goes back.
-- **New track:** start from scratch with any theme.
+- **New track:** start from scratch and pick a look (forest, beach, city street, sandlot...).
+- **Undo / Redo:** Ctrl+Z / Ctrl+Y or the buttons. Move the view with the arrow keys
+  (Shift = faster), drag, the mouse wheel, or a click on the whole-track map.
 - Changes save in your browser automatically. **Export** downloads a new
   `isopod-rider.html` with your tracks built in; upload it here to replace the old one.
 

@@ -377,8 +377,9 @@ const LEVELS=[
   {n:'MAIN STREET', seq:'yEU2NWz',          len:34000, fg:1.60, th:'parade', flat:true, nofin:true, par:35, md:[40.3,35.1,34.2,33.6], lay:2},  // PROVISIONAL: no human lap yet
   {n:'THE SANDLOT', seq:'WQJ2nW',          len:34000, fg:1.55, th:'orbit', flat:true, nofin:true, par:29, md:[33.5,28.9,28.3,27.80]},  // human best 27.94
 ];
-// Tracks as the file ships them (for "revert"), then any builder edits saved in this
-// browser on top. A saved new track whose name is now in the file counts as an edit.
+// Tracks as the file ships them (for "revert"), then any builder work saved in this
+// browser on top. Only tracks made in the builder (custom here, mine:true once exported
+// into the file) can change; the original tracks are locked.
 const LEVELS_FILE=LEVELS.map(L=>JSON.stringify(L));
 const BUILDKEY='isopodRider.builder.v1';
 try{
@@ -386,10 +387,11 @@ try{
     L.seq===e.seq&&JSON.stringify(L.tune||{})===JSON.stringify(e.tune||{});
   for(const c of sv.custom||[]){
     const L=LEVELS.find(T=>T.n===c.n);
-    if(L){if(!same(L,c))Object.assign(L,{seq:c.seq,tune:c.tune,len:c.len,edited:true});}
-    else LEVELS.push(Object.assign(c,{custom:true,edited:true}));
+    if(L&&L.mine){if(!same(L,c))Object.assign(L,{seq:c.seq,tune:c.tune,len:c.len,edited:true});continue;}
+    if(L)while(LEVELS.some(T=>T.n===c.n))c.n+=' 2';
+    LEVELS.push(Object.assign(c,{custom:true,edited:true}));
   }
-  for(const L of LEVELS){const e=sv.edits&&sv.edits[L.n];
+  for(const L of LEVELS){const e=L.mine&&sv.edits&&sv.edits[L.n];
     if(e&&!same(L,e))Object.assign(L,{seq:e.seq,tune:e.tune,len:e.len,edited:true});}
   for(const L of LEVELS)if(L.tune===undefined)delete L.tune;
 }catch(e){}
@@ -1676,7 +1678,8 @@ function build(){
   for(let x=0;x<MAXW;x++)G[x]=base(Math.min(x,LEN));
   for(let x=0;x<340;x++)G[x]=G[340];
   const seq=SEQ.split(''), TU=LEVELS[levelIdx].tune||{};
-  PROPS[LEVELS[levelIdx].n]=(PROPS_BASE[LEVELS[levelIdx].n]||[]).map(q=>Object.assign({},q));
+  const Lb=LEVELS[levelIdx];   // a copied track keeps the original's hand-placed props
+  PROPS[Lb.n]=(PROPS_BASE[Lb.n]||PROPS_BASE[Lb.from]||[]).map(q=>Object.assign({},q));
   pieceSpans.length=0;
   let x=560;
   for(let i=0;i<seq.length&&x<LEN-5400;i++){
@@ -4292,8 +4295,8 @@ function saveBuilder(){try{
     if(L.custom){const o=Object.assign({},L);delete o.custom;delete o.edited;sv.custom.push(o);}
     else if(L.edited)sv.edits[L.n]={seq:L.seq,tune:L.tune,len:L.len};
   });
-  localStorage.setItem(BUILDKEY,JSON.stringify(sv));
-}catch(e){}}
+  localStorage.setItem(BUILDKEY,JSON.stringify(sv)); bSaved=Date.now();
+}catch(e){bSaved=-1;}}
 
 /* ----- the gas-held preview -----
    Rides the current track with full throttle and nothing else, on the real physics,
@@ -4341,8 +4344,11 @@ function simGas(){
 
 /* ----- state ----- */
 let bSel=0, bCamX=0, bCamDY=0, bFast=false, bHeld={l:false,r:false,u:false,d:false};
-let bUndo=[], bRideIdx=-1, bDrag=null;
+let bUndo=[], bRedo=[], bRideIdx=-1, bDrag=null, bSaved=0;
 const bLv=()=>LEVELS[levelIdx];
+const THEME_NAMES={forest:'Forest (The Quarry)',beach:'Beach (Baja Beach)',parade:'City street (Main Street)',orbit:'Sandlot (The Sandlot)',
+  jungle:'Jungle (no picture yet)',club:'Night club (no picture yet)',sunset:'Sunset forest'};
+const bLocked=(L=bLv())=>!L.custom&&!L.mine;
 const tuneArr=L=>{const a=[];for(let i=0;i<L.seq.length;i++)
   a.push(L.tune&&L.tune[i]?Object.assign({},L.tune[i]):null);return a;};
 function setSeq(L,seq,ta){
@@ -4351,10 +4357,11 @@ function setSeq(L,seq,ta){
   if(Object.keys(t).length)L.tune=t;else delete L.tune;
 }
 const bState=()=>JSON.stringify({seq:bLv().seq,tune:bLv().tune||null,len:bLv().len});
-function bCommit(before){bUndo.push({lvl:levelIdx,s:before});if(bUndo.length>200)bUndo.shift();}
-function bUndoLast(){
-  const u=bUndo.pop(); if(!u)return;
+function bCommit(before){bUndo.push({lvl:levelIdx,s:before});if(bUndo.length>200)bUndo.shift();bRedo.length=0;}
+function bUndoLast(redo){
+  const from=redo?bRedo:bUndo, to=redo?bUndo:bRedo, u=from.pop(); if(!u)return;
   if(u.lvl!==levelIdx){loadLevel(u.lvl);}
+  to.push({lvl:u.lvl,s:bState()});
   const s=JSON.parse(u.s), L=bLv();
   L.seq=s.seq;L.len=s.len;if(s.tune)L.tune=s.tune;else delete L.tune;
   bApply();bPanel();
@@ -4372,7 +4379,7 @@ function bApply(){
     const last=pieceSpans[pieceSpans.length-1];
     const need=last?Math.max(last.a+5401,FINISH+200):8000;
     const F=fileLevel(i);   // a stock track only ever grows, so its checkpoints stay put
-    L.len=Math.min(MAXW-200,Math.max(F&&!L.custom?F.len:0,Math.ceil(need/100)*100));
+    L.len=Math.min(MAXW-200,Math.max(F&&!L.custom?F.len:(L.len0||0),Math.ceil(need/100)*100));
   }
   bestT[i]=null;ghost[i]=null;loadBest();loadGhosts();
   loadLevel(i);build();buildDecor();saveBuilder();
@@ -4436,6 +4443,7 @@ function builderKey(e){
   if(e.code==='KeyB'||e.code==='Escape'){
     if(document.getElementById('bModal'))bModalClose();else closeBuilder();
     e.preventDefault();return true;}
+  if((e.ctrlKey||e.metaKey)&&(e.code==='KeyY'||(e.code==='KeyZ'&&e.shiftKey))){bUndoLast(true);e.preventDefault();return true;}
   if((e.ctrlKey||e.metaKey)&&e.code==='KeyZ'){bUndoLast();e.preventDefault();return true;}
   bFast=e.shiftKey;
   if(e.code==='ArrowLeft'||e.code==='KeyA')bHeld.l=true;
@@ -4535,6 +4543,9 @@ function drawBuilder(){
 const BCSS=`#builder{position:fixed;top:0;right:0;bottom:0;width:${BUILDER_W}px;overflow-y:auto;
  background:#0f1f18;border-left:3px solid #24422f;color:#cfe0bb;font:12px Verdana,sans-serif;padding:10px;z-index:20}
 #builder h2{font-size:14px;color:#ffd23f;margin:2px 0 8px;display:flex;justify-content:space-between}
+#builder .lock{background:#24301f;border:1px solid #4d6b3f;border-radius:4px;padding:6px 8px;margin:6px 0;line-height:1.5}
+#builder .lock button{margin-top:5px}
+#builder input[type=range]:disabled{opacity:.45}
 #builder h3{font-size:11px;color:#8fb59a;margin:12px 0 5px;text-transform:uppercase;letter-spacing:1px}
 #builder button,#bModal button{background:#24422f;color:#e8f0d8;border:1px solid #3a6b4b;border-radius:4px;padding:4px 8px;font:11px Verdana,sans-serif;cursor:pointer}
 #builder button:hover,#bModal button:hover{background:#2f5a3f}
@@ -4575,29 +4586,32 @@ function bPanel(){
     const all=[...D.ps,N('space','Space before next piece',defSpace(k),0,1500,10)];
     knobs=all.map(p=>{const ch=ta[bSel]&&ta[bSel][p.id]!==undefined;
       return `<div class="bK"><label><span class="${ch?'chg':''}">${p.label}</span><b class="${ch?'chg':''}" id="bv_${p.id}">${+v[p.id].toFixed(3)}</b></label>
-      <input type="range" data-knob="${p.id}" min="${p.min}" max="${p.max}" step="${p.step}" value="${v[p.id]}"></div>`;}).join('')
+      <input type="range" data-knob="${p.id}" ${bLocked()?'disabled':''} min="${p.min}" max="${p.max}" step="${p.step}" value="${v[p.id]}"></div>`;}).join('')
       ||'<div class="tip">This piece has no sliders yet.</div>';
   }
   const cutFrom=pieceSpans.length;
   el.innerHTML=`<h2><span>TRACK BUILDER</span><button data-act="close" title="B or Esc">Close \u2715</button></h2>
   <div class="row"><select data-act="level">${LEVELS.map((T,i)=>`<option value="${i}" ${i===levelIdx?'selected':''}>${esc(T.n)}${T.edited?' (edited)':''}</option>`).join('')}</select>
    <button data-act="new">+ New track</button></div>
+  ${bLocked()?`<div class="lock"><b>Locked:</b> one of the original tracks: you can look and ride, not change it.
+   <button class="go" data-act="copytrack">Copy as my own track</button></div>`:''}
   ${L.custom?`<div class="row">Name <input type="text" data-act="name" value="${esc(L.n)}" style="width:150px">
-   <select data-act="theme">${Object.keys(THEMES).map(t=>`<option ${t===L.th?'selected':''}>${t}</option>`).join('')}</select>
+   Look <select data-act="theme">${Object.keys(THEMES).map(t=>`<option value="${t}" ${t===L.th?'selected':''}>${THEME_NAMES[t]||t}</option>`).join('')}</select>
    <label><input type="checkbox" data-act="flat" ${L.flat?'checked':''}> flat</label></div>`:''}
   <div id="bStats"></div>
   <h3>Whole track (click to jump there)</h3><canvas id="bMini" width="640" height="110"></canvas>
   <h3>Pieces</h3>
   <div id="bList">${seq.map((c,i)=>`<div data-pick="${i}" class="${i===bSel?'sel':''} ${i>=cutFrom?'cut':''}"><span>${i+1}. ${PIECES[c]?PIECES[c].name:'? '+esc(c)}${ta[i]?' *':''}</span><span>${esc(c)}</span></div>`).join('')||'<div>(empty \u2014 add a piece)</div>'}</div>
-  ${cutFrom<seq.length?`<div class="tip" style="color:#ff6b6b">Pieces after #${cutFrom} don't fit: the track is at its maximum length.</div>`:''}
+  ${bLocked()?'':`
   <div class="row"><button data-act="up">\u25b2 Up</button><button data-act="down">\u25bc Down</button><button data-act="dup">Copy</button><button data-act="del">Delete</button></div>
-  <div class="row"><select data-act="addk">${opts}</select><button data-act="add">+ Add after</button></div>
+  <div class="row"><select data-act="addk">${opts}</select><button data-act="add">+ Add after</button></div>`}
+  ${cutFrom<seq.length?`<div class="tip" style="color:#ff6b6b">Pieces after #${cutFrom} don't fit: the track is at its maximum length.</div>`:''}
   ${D?`<h3>#${bSel+1} ${D.name}</h3>
   <canvas id="bSec" width="640" height="260"></canvas>
   ${knobs}
-  <div class="row"><button class="go" data-act="ride">\u25b6 Ride from here (Enter)</button><button data-act="rpiece">Reset piece</button></div>`:''}
+  <div class="row"><button class="go" data-act="ride">\u25b6 Ride from here (Enter)</button>${bLocked()?'':'<button data-act="rpiece">Reset piece</button>'}</div>`:''}
   <h3>Track</h3>
-  <div class="row"><button data-act="undo">Undo (Ctrl+Z)</button><button data-act="revert">${L.custom?'Delete track':'Revert to original'}</button><button data-act="export">Export\u2026</button></div>
+  <div class="row"><button data-act="undo">Undo (Ctrl+Z)</button><button data-act="redo">Redo (Ctrl+Y)</button>${bLocked()?'':`<button data-act="revert">${L.custom?'Delete track':'Revert to saved file'}</button>`}<button data-act="export">Export\u2026</button></div>
   <div class="tip">Arrows / drag / scroll wheel: move the view &middot; [ ] next/previous piece &middot; click a piece on the track to pick it.<br>
   Yellow line: where a rider holding gas the whole time goes. Dots are half a second apart. Red X: that rider bails.<br>
   Changes save in this browser automatically. Export puts them into the game file.</div>`;
@@ -4609,7 +4623,8 @@ function bStats(){
   if(!bSim){el.innerHTML='Working out the gas-held line\u2026';return;}
   el.innerHTML=`Holding gas: ${bSim.won?`<span class="ok">finishes in ${bSim.t.toFixed(2)}s</span>`:`<span class="bad">does not finish</span>`}
    ${bSim.bails.length?` &middot; <span class="bad">${bSim.bails.length} bail${bSim.bails.length>1?'s':''}</span>`:' &middot; no bails'}<br>
-   ${L.seq.length} pieces &middot; length ${L.len}${L.edited?' &middot; <span style="color:#ffd23f">edited</span>':''}`;
+   ${L.seq.length} pieces &middot; length ${L.len}${L.edited?' &middot; <span style="color:#ffd23f">edited</span>':''}<br>
+   ${bSaved<0?'<span class="bad">Could not save in this browser</span>':bSaved?`<span class="ok">\u2713 Saved ${new Date(bSaved).toLocaleTimeString()}</span>`:'Changes save automatically'}`;
   bSec();
 }
 function bMini(){
@@ -4669,7 +4684,9 @@ function bClick(e){
   if(pick){bSel=+pick.dataset.pick;bPanel();bFocus(bSel);return;}
   const b=e.target.closest('button'); if(!b)return;
   const L=bLv(), seq=L.seq.split(''), ta=tuneArr(L), i=bSel, act=b.dataset.act;
+  if(bLocked()&&['up','down','dup','del','add','rpiece','revert'].includes(act))return;
   if(act==='close')closeBuilder();
+  else if(act==='copytrack')bNewTrack(L);
   else if(act==='up'&&i>0)bEdit(()=>{[seq[i-1],seq[i]]=[seq[i],seq[i-1]];[ta[i-1],ta[i]]=[ta[i],ta[i-1]];setSeq(L,seq,ta);bSel--;});
   else if(act==='down'&&i<seq.length-1)bEdit(()=>{[seq[i+1],seq[i]]=[seq[i],seq[i+1]];[ta[i+1],ta[i]]=[ta[i],ta[i+1]];setSeq(L,seq,ta);bSel++;});
   else if(act==='dup'&&seq.length)bEdit(()=>{seq.splice(i+1,0,seq[i]);ta.splice(i+1,0,ta[i]?Object.assign({},ta[i]):null);setSeq(L,seq,ta);bSel++;});
@@ -4679,13 +4696,14 @@ function bClick(e){
   else if(act==='rpiece')bEdit(()=>{ta[i]=null;setSeq(L,seq,ta);});
   else if(act==='ride')rideFrom(i);
   else if(act==='undo')bUndoLast();
+  else if(act==='redo')bUndoLast(true);
   else if(act==='new')bNewTrack();
   else if(act==='revert')bRevert();
   else if(act==='export')bExport();
 }
 let bKnobBefore=null;
 function bInput(e){
-  const id=e.target.dataset.knob; if(!id)return;
+  const id=e.target.dataset.knob; if(!id||bLocked())return;
   const L=bLv(), seq=L.seq.split(''), ta=tuneArr(L), k=seq[bSel];
   if(bKnobBefore===null)bKnobBefore=bState();
   const val=+e.target.value, p=id==='space'?{def:defSpace(k)}:PIECES[k].ps.find(q=>q.id===id);
@@ -4698,16 +4716,21 @@ function bInput(e){
 function bChange(e){
   const act=e.target.dataset.act, L=bLv();
   if(e.target.dataset.knob){if(bKnobBefore!==null&&bKnobBefore!==bState())bCommit(bKnobBefore);bKnobBefore=null;bPanel();return;}
+  if(e.target.dataset.knob&&bLocked())return;
   if(act==='level'){loadLevel(+e.target.value);bSel=0;bApply();bPanel();bFocus(0);}
   else if(act==='name'){const nm=e.target.value.trim().toUpperCase();
     if(nm&&!LEVELS.some(T=>T!==L&&T.n===nm)){PROPS[nm]=PROPS[L.n];L.n=nm;}bApply();bPanel();}
   else if(act==='theme'){L.th=e.target.value;bApply();}
   else if(act==='flat'){bEdit(()=>{L.flat=e.target.checked;});}
 }
-function bNewTrack(){
-  let nm=(prompt('Name for the new track?','MY TRACK')||'').trim().toUpperCase(); if(!nm)return;
+function bNewTrack(from){
+  let nm=(prompt('Name for the new track?',from?'MY '+from.n:'MY TRACK')||'').trim().toUpperCase(); if(!nm)return;
   while(LEVELS.some(T=>T.n===nm))nm+=' 2';
-  LEVELS.push({n:nm,seq:'kWj',len:20000,fg:1.6,th:bLv().th,flat:true,nofin:true,par:30,custom:true,edited:true});
+  const T={n:nm,seq:'kWj',len:20000,fg:1.6,th:bLv().th,flat:true,nofin:true,par:30,custom:true,edited:true};
+  if(from){for(const k of ['seq','len','fg','th','flat','par'])if(from[k]!==undefined)T[k]=from[k];
+    T.len0=from.len;T.from=from.from||from.n;   // same length as the original, so the copy rides the same
+    if(from.tune)T.tune=JSON.parse(JSON.stringify(from.tune));if(!from.flat)delete T.flat;}
+  LEVELS.push(T);
   bestT.push(null);ghost.push(null);
   loadLevel(LEVELS.length-1);bSel=0;bApply();bPanel();bFocus(0);
 }
@@ -4733,7 +4756,8 @@ function jsVal(v){
 }
 function levelLine(L,i){
   const F=fileLevel(i), o={};
-  for(const k of ['n','seq','len','fg','th','flat','nofin','par','md','lay','tune'])if(L[k]!==undefined&&L[k]!==false)o[k]=L[k];
+  for(const k of ['n','from','seq','len','len0','fg','th','flat','nofin','par','md','lay','tune'])if(L[k]!==undefined&&L[k]!==false)o[k]=L[k];
+  o.mine=true;
   if(L.custom&&bSim&&levelIdx===i&&bSim.won)o.par=Math.round(bSim.t);
   if(F&&!L.custom)o.lay=(F.lay||1)+1;        // a new layout: old best times don't carry over
   if(L.custom)delete o.md;
